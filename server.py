@@ -33,9 +33,10 @@ from retention import get_snapshots_storage_stats, prune_snapshots
 from stream_watchdog import StreamWatchdog
 from supervisor import get_hardware_diagnostics
 
-SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
+BASE_DIR = Path(__file__).resolve().parent
+SNAPSHOTS_DIR = BASE_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-INDEX_HTML = Path("/workspace/scratch/outpost/index.html")
+INDEX_HTML = BASE_DIR / "index.html"
 
 app = FastAPI(
     title="Outpost Wildlife CV Telemetry Bus",

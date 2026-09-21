@@ -18,7 +18,8 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from PIL import Image, ImageDraw
 
-SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
+BASE_DIR = Path(__file__).resolve().parent
+SNAPSHOTS_DIR = BASE_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Simulated stream configurations

@@ -19,7 +19,8 @@ import requests
 import streamlink
 from ultralytics import YOLO
 
-SNAPSHOTS_DIR = Path("snapshots")
+BASE_DIR = Path(__file__).resolve().parent
+SNAPSHOTS_DIR = BASE_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 

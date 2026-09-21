@@ -112,8 +112,9 @@ def prune_snapshots(
 
 
 if __name__ == "__main__":
+    default_snapshots_dir = str(Path(__file__).resolve().parent / "snapshots")
     parser = argparse.ArgumentParser(description="Outpost Snapshot Storage Pruning Engine")
-    parser.add_argument("--dir", type=str, default="/workspace/scratch/outpost/snapshots")
+    parser.add_argument("--dir", type=str, default=default_snapshots_dir)
     parser.add_argument("--max-age-hours", type=float, default=24.0)
     parser.add_argument("--max-storage-mb", type=float, default=500.0)
     args = parser.parse_args()
