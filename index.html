@@ -204,7 +204,7 @@
       statusText.textContent = 'Disconnected · Retrying';
     };
 
-    function handleDetection(evt) {
+    function handleDetection(evt, isBackfill = false) {
       totalDetections++;
       seenSpecies.add(evt.species);
       statDetections.textContent = totalDetections;
@@ -213,9 +213,11 @@
       // Update Stream Tile
       const tile = document.getElementById(`tile-${evt.stream_id}`);
       if (tile) {
-        tile.classList.remove('detection-flash');
-        void tile.offsetWidth; // trigger reflow
-        tile.classList.add('detection-flash');
+        if (!isBackfill) {
+          tile.classList.remove('detection-flash');
+          void tile.offsetWidth; // trigger reflow
+          tile.classList.add('detection-flash');
+        }
 
         const lastSeen = document.getElementById(`${evt.stream_id}-last-seen`);
         if (lastSeen) lastSeen.textContent = `${evt.species} (${Math.round(evt.confidence * 100)}%)`;
@@ -239,7 +241,7 @@
       }
 
       // Trigger high-visibility alert banner and audio chime if alert rule matched
-      if (evt.metadata && evt.metadata.alert_triggered) {
+      if (!isBackfill && evt.metadata && evt.metadata.alert_triggered) {
         showAlertBanner(`🚨 TARGET SPECIES ALERT: ${evt.species} sighted on ${evt.stream_id} (${Math.round(evt.confidence * 100)}% confidence)!`);
         playWildlifeChime();
       }
@@ -256,7 +258,7 @@
           : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-200'
       }`;
 
-      const timeStr = new Date().toLocaleTimeString();
+      const timeStr = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
       card.innerHTML = `
         <div class="flex items-center justify-between mb-1">
           <span class="font-semibold text-slate-100">${evt.species}</span>
@@ -274,6 +276,26 @@
       if (eventFeed.children.length > 40) {
         eventFeed.removeChild(eventFeed.lastChild);
       }
+    }
+
+    // Hydrate event feed and stream tiles from ring buffer on initial page load
+    async function backfillRecentEvents() {
+      try {
+        const res = await fetch(`${API_BASE}/events/recent?limit=40`);
+        if (!res.ok) return;
+        const events = await res.json();
+        if (Array.isArray(events)) {
+          events.forEach(evt => handleDetection(evt, true));
+        }
+      } catch (err) {
+        console.warn('Initial events backfill error:', err);
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', backfillRecentEvents);
+    } else {
+      backfillRecentEvents();
     }
 
     // Audio Alert Chime & Controls
