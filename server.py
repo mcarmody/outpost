@@ -28,6 +28,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from retention import get_snapshots_storage_stats, prune_snapshots
+
 SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_HTML = Path("/workspace/scratch/outpost/index.html")
@@ -113,6 +115,7 @@ start_time = time.time()
 @app.get("/health")
 async def health_check():
     """System telemetry and active subscriber metrics."""
+    snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
     return {
         "status": "online",
         "service": "outpost-telemetry-bus",
@@ -121,7 +124,16 @@ async def health_check():
         "ring_buffer_depth": len(recent_events),
         "total_events_dispatched": total_events_dispatched,
         "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
+        "snapshot_storage_mb": snap_stats["total_mb"],
+        "snapshot_files_count": snap_stats["total_files"],
     }
+
+
+@app.post("/api/maintenance/prune")
+async def trigger_prune(max_age_hours: float = 24.0, max_storage_mb: float = 500.0):
+    """Manually triggers snapshot retention pruning."""
+    res = prune_snapshots(SNAPSHOTS_DIR, max_age_hours=max_age_hours, max_storage_mb=max_storage_mb)
+    return {"status": "success", **res}
 
 
 @app.get("/events/recent", response_model=List[DetectionEvent])

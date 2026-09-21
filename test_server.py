@@ -199,3 +199,33 @@ def test_simulate_event_integration():
     snap_resp = client.get(payload["snapshot_url"])
     assert snap_resp.status_code == 200
     assert "image" in snap_resp.headers.get("content-type", "")
+
+
+def test_retention_and_prune(tmp_path):
+    from retention import get_snapshots_storage_stats, prune_snapshots
+
+    # Create test snapshots in tmp_path
+    f1 = tmp_path / "snap1.jpg"
+    f2 = tmp_path / "snap2.jpg"
+    f1.write_bytes(b"0" * 1024 * 500)  # 500 KB
+    f2.write_bytes(b"0" * 1024 * 500)  # 500 KB
+
+    stats = get_snapshots_storage_stats(tmp_path)
+    assert stats["total_files"] == 2
+    assert stats["total_mb"] >= 0.9
+
+    # Prune with ceiling smaller than 1MB
+    res = prune_snapshots(tmp_path, max_age_hours=24.0, max_storage_mb=0.6)
+    assert res["pruned_files"] >= 1
+    assert res["freed_mb"] > 0
+
+
+def test_maintenance_prune_endpoint():
+    client = TestClient(app)
+    resp = client.post("/api/maintenance/prune?max_age_hours=48.0&max_storage_mb=500.0")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "success"
+    assert "pruned_files" in data
+    assert "freed_mb" in data
+
