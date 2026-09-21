@@ -102,6 +102,30 @@ for sid, info in KNOWN_STREAMS.items():
         "last_detection": None,
     }
 
+# Reported hardware from edge CV runners (e.g. Mike's RTX 4090 box), keyed
+# by whatever they self-identify as. get_hardware_diagnostics() below only
+# ever sees the relay server's own hardware (a CPU-only Linux box) — that
+# made /health and the dashboard claim "no CUDA" even while real inference
+# was running on the 4090, because nobody was asking the actual GPU box.
+# runner.py registers here once at startup; entries older than
+# EDGE_HARDWARE_TTL_SECONDS are treated as stale and ignored.
+edge_runner_hardware: Dict[str, Dict[str, Any]] = {}
+EDGE_HARDWARE_TTL_SECONDS = 180.0
+
+
+def get_active_edge_hardware() -> Optional[Dict[str, Any]]:
+    """Most recently registered, non-stale, CUDA-capable edge runner, if any."""
+    now = time.time()
+    candidates = [
+        v for v in edge_runner_hardware.values()
+        if now - v.get("reported_at", 0) <= EDGE_HARDWARE_TTL_SECONDS
+    ]
+    if not candidates:
+        return None
+    cuda_candidates = [c for c in candidates if c.get("cuda_available")]
+    pool = cuda_candidates or candidates
+    return max(pool, key=lambda c: c.get("reported_at", 0))
+
 species_stats: Dict[str, Dict[str, Any]] = {}
 
 # Stream-level species allowlists to suppress out-of-domain generic COCO hallucinations
@@ -186,11 +210,51 @@ total_events_dispatched = 0
 start_time = time.time()
 
 
+class EdgeRunnerRegistration(BaseModel):
+    stream_id: str
+    cuda_available: bool = False
+    device_name: str = "CPU Only"
+    total_vram_gb: float = 0.0
+    hostname: Optional[str] = None
+
+
+@app.post("/api/runner/register")
+async def register_edge_runner(reg: EdgeRunnerRegistration):
+    """Edge CV runner (e.g. runner.py on Mike's 4090) self-reports its real
+    hardware here. /health and /api/supervisor prefer this over the relay
+    server's own (usually CPU-only) hardware when a recent report exists."""
+    edge_runner_hardware[reg.stream_id] = {
+        "cuda_available": reg.cuda_available,
+        "device_name": reg.device_name,
+        "total_vram_gb": reg.total_vram_gb,
+        "hostname": reg.hostname,
+        "reported_at": time.time(),
+    }
+    return {"status": "registered", "stream_id": reg.stream_id}
+
+
+def _hardware_for_status_endpoints() -> Dict[str, Any]:
+    edge = get_active_edge_hardware()
+    if edge:
+        return {
+            "cuda_available": edge["cuda_available"],
+            "device_name": edge["device_name"],
+            "total_vram_gb": edge["total_vram_gb"],
+            "recommended_mode": "cuda_tensorrt" if edge["cuda_available"] else "synthetic",
+            "host_platform": edge.get("hostname") or "edge-runner",
+            "python_version": None,
+            "hardware_source": "edge_runner",
+        }
+    hw = get_hardware_diagnostics()
+    hw["hardware_source"] = "relay_server"
+    return hw
+
+
 @app.get("/health")
 async def health_check():
     """System telemetry and active subscriber metrics."""
     snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
-    hw = get_hardware_diagnostics()
+    hw = _hardware_for_status_endpoints()
     return {
         "status": "online",
         "service": "outpost-telemetry-bus",
@@ -207,8 +271,10 @@ async def health_check():
 
 @app.get("/api/supervisor")
 async def get_supervisor_status():
-    """Returns supervisor hardware capability diagnostics and recommended execution mode."""
-    return get_hardware_diagnostics()
+    """Returns hardware capability diagnostics and recommended execution mode
+    — the active edge runner's real hardware when one has reported in
+    recently, otherwise the relay server's own (see hardware_source)."""
+    return _hardware_for_status_endpoints()
 
 
 

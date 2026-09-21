@@ -152,7 +152,7 @@
           </div>
 
           <div class="pt-4 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
-            <span>Hardware: NVIDIA RTX 4090 · TensorRT FP16</span>
+            <span id="hardware-status">Hardware: checking...</span>
             <span class="text-indigo-400 font-mono">SSE Bus: :8000/events</span>
           </div>
         </div>
@@ -305,6 +305,33 @@
       document.addEventListener('DOMContentLoaded', backfillRecentEvents);
     }
     window.addEventListener('load', backfillRecentEvents);
+
+    // Real hardware status — was previously a hardcoded "NVIDIA RTX 4090"
+    // string shown regardless of whether anything was actually running.
+    // /api/supervisor now reports the active edge runner's real hardware
+    // (or says plainly that none is currently reporting in).
+    async function loadHardwareStatus() {
+      const el = document.getElementById('hardware-status');
+      const fpsEl = document.getElementById('stat-fps');
+      try {
+        const res = await fetch(`${API_BASE}/api/supervisor`);
+        const hw = await res.json();
+        if (hw.hardware_source === 'edge_runner' && hw.cuda_available) {
+          el.textContent = `Hardware: ${hw.device_name} (${hw.total_vram_gb}GB) · edge runner`;
+          el.className = 'text-emerald-400';
+          if (fpsEl) fpsEl.textContent = 'live';
+        } else {
+          el.textContent = 'Hardware: no edge GPU runner reporting — relay only';
+          el.className = 'text-amber-400';
+          if (fpsEl) fpsEl.textContent = 'idle';
+        }
+      } catch (err) {
+        el.textContent = 'Hardware: status unavailable';
+        console.warn('Hardware status fetch failed:', err);
+      }
+    }
+    loadHardwareStatus();
+    setInterval(loadHardwareStatus, 30000);
 
     // Audio Alert Chime & Controls
     let audioAlertEnabled = true;

@@ -92,7 +92,38 @@ def dispatch_event(
             print(f"[!] Warning: Failed to dispatch event to {api_url}: {e}")
 
 
+def register_hardware(api_url: Optional[str], stream_id: str):
+    """Report this box's real GPU to the relay server so /health and
+    /api/supervisor stop describing the (CPU-only) relay itself as
+    'the hardware' while this runner is doing the actual CUDA inference."""
+    if not api_url:
+        return
+    try:
+        import platform
+        import socket
+        import torch
+        cuda_available = torch.cuda.is_available()
+        device_name = torch.cuda.get_device_name(0) if cuda_available else "CPU Only"
+        total_vram_gb = (
+            round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
+            if cuda_available else 0.0
+        )
+        payload = {
+            "stream_id": stream_id,
+            "cuda_available": cuda_available,
+            "device_name": device_name,
+            "total_vram_gb": total_vram_gb,
+            "hostname": f"{socket.gethostname()} ({platform.system()})",
+        }
+        requests.post(f"{api_url.rstrip('/')}/api/runner/register", json=payload, timeout=3.0)
+        print(f"[*] Registered hardware with {api_url}: {device_name}")
+    except Exception as e:
+        print(f"[!] Warning: hardware registration failed: {e}")
+
+
 def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name: str = "yolo11x.pt", api_url: Optional[str] = "http://localhost:8000"):
+    register_hardware(api_url, stream_id)
+
     print(f"[*] Loading model {model_name} onto CUDA...")
     model = YOLO(model_name)
     model.to("cuda")
