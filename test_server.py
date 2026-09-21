@@ -4,7 +4,16 @@ import asyncio
 import json
 import pytest
 from fastapi.testclient import TestClient
-from server import app, recent_events, subscribers, total_events_dispatched
+from server import (
+    app,
+    recent_events,
+    subscribers,
+    species_stats,
+    stream_telemetry,
+    recent_alerts,
+    alert_rules,
+    AlertRule,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -12,6 +21,8 @@ def reset_state():
     """Reset in-memory state before each test."""
     recent_events.clear()
     subscribers.clear()
+    species_stats.clear()
+    recent_alerts.clear()
 
 
 def test_health_check():
@@ -40,7 +51,7 @@ def test_ingest_and_recent_events():
         "species": "garibaldi",
         "confidence": 0.92,
         "bbox": [100, 200, 150, 280],
-        "metadata": {"water_temp_c": 18.5}
+        "metadata": {"water_temp_c": 18.5},
     }
     response = client.post("/api/events", json=payload)
     assert response.status_code == 201
@@ -57,6 +68,80 @@ def test_ingest_and_recent_events():
     assert events[0]["confidence"] == 0.92
 
 
+def test_streams_and_species_stats():
+    client = TestClient(app)
+    payload1 = {
+        "stream_id": "anacapa_kelp_01",
+        "species": "giant_sea_bass",
+        "confidence": 0.88,
+        "bbox": [50, 50, 200, 200],
+    }
+    payload2 = {
+        "stream_id": "anacapa_kelp_01",
+        "species": "giant_sea_bass",
+        "confidence": 0.94,
+        "bbox": [60, 60, 210, 210],
+    }
+    client.post("/api/events", json=payload1)
+    client.post("/api/events", json=payload2)
+
+    # Verify streams endpoint
+    streams_res = client.get("/api/streams")
+    assert streams_res.status_code == 200
+    streams = streams_res.json()
+    anacapa = next(s for s in streams if s["stream_id"] == "anacapa_kelp_01")
+    assert anacapa["status"] == "active"
+    assert anacapa["total_detections"] >= 2
+
+    # Verify species stats
+    stats_res = client.get("/api/stats/species")
+    assert stats_res.status_code == 200
+    stats = stats_res.json()
+    assert len(stats) >= 1
+    bass = next(s for s in stats if s["species"] == "giant_sea_bass")
+    assert bass["count"] == 2
+    assert bass["peak_confidence"] == 0.94
+
+
+def test_alert_rules_and_triggering():
+    client = TestClient(app)
+    # Register alert rule for bald_eagle
+    rule_payload = {
+        "species": "bald_eagle",
+        "min_confidence": 0.75,
+        "enabled": True,
+    }
+    create_res = client.post("/api/alerts", json=rule_payload)
+    assert create_res.status_code == 201
+
+    # Ingest non-matching event
+    client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "chickadee",
+        "confidence": 0.85,
+        "bbox": [10, 10, 20, 20],
+    })
+    assert len(recent_alerts) == 0
+
+    # Ingest matching event
+    eagle_resp = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "bald_eagle",
+        "confidence": 0.91,
+        "bbox": [50, 50, 300, 300],
+    })
+    assert eagle_resp.status_code == 201
+    assert len(recent_alerts) == 1
+    assert recent_alerts[0]["species"] == "bald_eagle"
+
+    # Query recent alerts endpoint
+    alerts_res = client.get("/api/alerts/recent")
+    assert alerts_res.status_code == 200
+    alerts_data = alerts_res.json()
+    assert len(alerts_data) == 1
+    assert alerts_data[0]["species"] == "bald_eagle"
+
+
 def test_ring_buffer_cap():
     client = TestClient(app)
     for i in range(250):
@@ -64,7 +149,7 @@ def test_ring_buffer_cap():
             "stream_id": "feeder_01",
             "species": f"bird_{i}",
             "confidence": 0.85,
-            "bbox": [10, 10, 50, 50]
+            "bbox": [10, 10, 50, 50],
         })
 
     rec_res = client.get("/events/recent?limit=250")

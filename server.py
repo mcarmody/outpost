@@ -4,6 +4,11 @@ Provides:
 - GET /events: Real-time SSE stream for web UI clients
 - GET /events/recent: Ring-buffer snapshot for immediate client state
 - POST /api/events: Ingest endpoint for wildlife_cv_runner (4090 / CUDA)
+- GET /api/streams: Active streams registry, status, and telemetry
+- GET /api/stats/species: Aggregated species sightings and frequency breakdown
+- GET /api/alerts: Target species alert configuration rules
+- POST /api/alerts: Register new target species alert rule
+- GET /api/alerts/recent: Ring buffer of triggered alerts
 - GET /health: Service telemetry & connection health
 - Static snapshot file serving under /snapshots/
 """
@@ -30,7 +35,7 @@ INDEX_HTML = Path("/workspace/scratch/outpost/index.html")
 app = FastAPI(
     title="Outpost Wildlife CV Telemetry Bus",
     description="Real-time SSE event dispatcher and ring buffer for public wildlife livestreams",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # Enable CORS for local dev and staged frontends (Vite, Next.js, GitHub Pages)
@@ -65,6 +70,39 @@ class DetectionEvent(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AlertRule(BaseModel):
+    rule_id: str = Field(default_factory=lambda: f"rule_{uuid.uuid4().hex[:6]}")
+    species: str
+    min_confidence: float = 0.75
+    stream_id: Optional[str] = None
+    enabled: bool = True
+    created_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+
+# In-memory stream registry
+KNOWN_STREAMS = {
+    "anacapa_kelp_01": {"name": "Anacapa Island Kelp Forest", "provider": "Explore.org", "fps_target": 120},
+    "cornell_feeder_01": {"name": "Cornell Lab FeederWatch", "provider": "Cornell Lab", "fps_target": 60},
+    "katmai_brooks_01": {"name": "Katmai Brooks Falls", "provider": "Explore.org", "fps_target": 60},
+}
+
+stream_telemetry: Dict[str, Dict[str, Any]] = {}
+for sid, info in KNOWN_STREAMS.items():
+    stream_telemetry[sid] = {
+        **info,
+        "stream_id": sid,
+        "status": "idle",
+        "total_detections": 0,
+        "last_detection": None,
+    }
+
+species_stats: Dict[str, Dict[str, Any]] = {}
+alert_rules: List[AlertRule] = [
+    AlertRule(species="brown_bear", min_confidence=0.80),
+    AlertRule(species="bald_eagle", min_confidence=0.75),
+]
+recent_alerts: deque = deque(maxlen=50)
+
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
 subscribers: Set[asyncio.Queue] = set()
@@ -82,6 +120,7 @@ async def health_check():
         "active_sse_subscribers": len(subscribers),
         "ring_buffer_depth": len(recent_events),
         "total_events_dispatched": total_events_dispatched,
+        "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
     }
 
 
@@ -92,10 +131,91 @@ async def get_recent_events(limit: int = 50):
     return events[-limit:]
 
 
+@app.get("/api/streams")
+async def get_streams():
+    """Retrieve all monitored streams and their live telemetry status."""
+    return list(stream_telemetry.values())
+
+
+@app.get("/api/stats/species")
+async def get_species_stats():
+    """Retrieve species detection counts, peak confidence, and recency."""
+    return sorted(species_stats.values(), key=lambda x: x["count"], reverse=True)
+
+
+@app.get("/api/alerts")
+async def get_alerts():
+    """List configured target species alert rules."""
+    return alert_rules
+
+
+@app.post("/api/alerts", status_code=201)
+async def create_alert(alert: AlertRule):
+    """Register a new target species alert rule."""
+    alert_rules.append(alert)
+    return {"status": "created", "rule": alert}
+
+
+@app.get("/api/alerts/recent")
+async def get_recent_alerts(limit: int = 20):
+    """Retrieve recent triggered species alerts."""
+    return list(recent_alerts)[-limit:]
+
+
 @app.post("/api/events", status_code=201)
 async def ingest_event(event: DetectionEvent):
     """Ingest a detection event from the 4090 CV runner and broadcast to SSE subscribers."""
     global total_events_dispatched
+
+    # Update stream state
+    if event.stream_id not in stream_telemetry:
+        stream_telemetry[event.stream_id] = {
+            "stream_id": event.stream_id,
+            "name": event.stream_id,
+            "provider": "Custom",
+            "fps_target": 60,
+            "status": "active",
+            "total_detections": 0,
+            "last_detection": None,
+        }
+    stream_telemetry[event.stream_id]["status"] = "active"
+    stream_telemetry[event.stream_id]["total_detections"] += 1
+    stream_telemetry[event.stream_id]["last_detection"] = event.timestamp
+
+    # Update species aggregation stats
+    sp = event.species
+    if sp not in species_stats:
+        species_stats[sp] = {
+            "species": sp,
+            "count": 0,
+            "peak_confidence": event.confidence,
+            "last_seen": event.timestamp,
+            "streams": [event.stream_id],
+        }
+    species_stats[sp]["count"] += 1
+    species_stats[sp]["peak_confidence"] = max(species_stats[sp]["peak_confidence"], event.confidence)
+    species_stats[sp]["last_seen"] = event.timestamp
+    if event.stream_id not in species_stats[sp]["streams"]:
+        species_stats[sp]["streams"].append(event.stream_id)
+
+    # Check alert rules
+    for rule in alert_rules:
+        if rule.enabled and rule.species.lower() == sp.lower():
+            if (rule.stream_id is None or rule.stream_id == event.stream_id) and event.confidence >= rule.min_confidence:
+                alert_entry = {
+                    "alert_id": f"alt_{uuid.uuid4().hex[:8]}",
+                    "rule_id": rule.rule_id,
+                    "event_id": event.event_id,
+                    "species": sp,
+                    "confidence": event.confidence,
+                    "stream_id": event.stream_id,
+                    "timestamp": event.timestamp,
+                }
+                recent_alerts.append(alert_entry)
+                event.metadata["alert_triggered"] = True
+                event.metadata["matched_rule_id"] = rule.rule_id
+                break
+
     recent_events.append(event)
     total_events_dispatched += 1
 
