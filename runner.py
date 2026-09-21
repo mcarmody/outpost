@@ -44,16 +44,17 @@ def dispatch_event(
     frame=None,
 ):
     event_id = f"evt_{uuid.uuid4().hex[:8]}"
-    snapshot_rel_path = None
+    today_str = time.strftime("%Y%m%d")
+    snapshot_rel_path = f"/snapshots/{today_str}/{event_id}.jpg"
 
     if frame is not None:
-        today_str = time.strftime("%Y%m%d")
-        day_dir = SNAPSHOTS_DIR / today_str
-        day_dir.mkdir(parents=True, exist_ok=True)
-        img_path = day_dir / f"{event_id}.jpg"
-        # Save snapshot
-        cv2.imwrite(str(img_path), frame)
-        snapshot_rel_path = f"/snapshots/{today_str}/{event_id}.jpg"
+        try:
+            day_dir = SNAPSHOTS_DIR / today_str
+            day_dir.mkdir(parents=True, exist_ok=True)
+            img_path = day_dir / f"{event_id}.jpg"
+            cv2.imwrite(str(img_path), frame)
+        except Exception:
+            pass
 
     payload = {
         "event_id": event_id,
@@ -68,8 +69,24 @@ def dispatch_event(
     print(f"[{time.strftime('%X')}] DETECTED: {species} ({confidence:.2f}) -> {event_id}")
 
     if api_url:
+        base = api_url.rstrip("/")
         try:
-            requests.post(f"{api_url.rstrip('/')}/api/events", json=payload, timeout=1.0)
+            if frame is not None:
+                # Multipart upload of JPEG frame and event metadata
+                ok, img_buf = cv2.imencode(".jpg", frame)
+                if ok:
+                    files = {"file": (f"{event_id}.jpg", img_buf.tobytes(), "image/jpeg")}
+                    data = {"event_data": json.dumps(payload)}
+                    res = requests.post(f"{base}/api/events/upload", files=files, data=data, timeout=3.0)
+                    if res.status_code in (200, 201):
+                        r_data = res.json()
+                        if r_data.get("filtered"):
+                            print(f"  [i] Stream allowlist filtered: {r_data.get('reason')}")
+                        return
+            # Fallback to standard JSON dispatch
+            res = requests.post(f"{base}/api/events", json=payload, timeout=2.0)
+            if res.status_code in (200, 201) and res.json().get("filtered"):
+                print(f"  [i] Stream allowlist filtered: {res.json().get('reason')}")
         except Exception as e:
             print(f"[!] Warning: Failed to dispatch event to {api_url}: {e}")
 

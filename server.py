@@ -22,7 +22,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -103,6 +103,71 @@ for sid, info in KNOWN_STREAMS.items():
     }
 
 species_stats: Dict[str, Dict[str, Any]] = {}
+
+# Stream-level species allowlists to suppress out-of-domain generic COCO hallucinations
+stream_allowlists: Dict[str, Dict[str, Any]] = {
+    "cornell_feeder_01": {
+        "stream_id": "cornell_feeder_01",
+        "allowed_species": [
+            "bird", "mourning dove", "northern cardinal", "cardinal",
+            "blue jay", "black-capped chickadee", "chickadee", "tufted titmouse",
+            "titmouse", "white-breasted nuthatch", "nuthatch", "american goldfinch",
+            "goldfinch", "house finch", "finch", "downy woodpecker", "woodpecker",
+            "red-bellied woodpecker", "squirrel", "eastern gray squirrel",
+            "chipmunk", "common raven", "raven", "american crow", "crow",
+            "dark-eyed junco", "sparrow", "song sparrow", "european starling",
+            "bald eagle", "eagle", "hawk", "cooper's hawk", "sharp-shinned hawk",
+            "raptor",
+        ],
+        "strict_filtering": True,
+    },
+    "anacapa_kelp_01": {
+        "stream_id": "anacapa_kelp_01",
+        "allowed_species": [
+            "fish", "garibaldi", "california sheephead", "sheephead",
+            "giant kelp bass", "giant sea bass", "kelp bass", "sea bass", "bass",
+            "harbor seal", "seal", "california sea lion", "sea lion",
+            "bat ray", "ray", "leopard shark", "shark", "scuba diver", "diver", "marine_life",
+        ],
+        "strict_filtering": True,
+    },
+    "katmai_brooks_01": {
+        "stream_id": "katmai_brooks_01",
+        "allowed_species": [
+            "bear", "brown bear", "grizzly bear", "salmon", "sockeye salmon",
+            "fish", "bald eagle", "eagle", "gull", "glaucous-winged gull",
+            "raven", "wolf",
+        ],
+        "strict_filtering": True,
+    },
+    "katmai_brooks_falls": {
+        "stream_id": "katmai_brooks_falls",
+        "allowed_species": [
+            "bear", "brown bear", "grizzly bear", "salmon", "sockeye salmon",
+            "fish", "bald eagle", "eagle", "gull", "glaucous-winged gull",
+            "raven", "wolf",
+        ],
+        "strict_filtering": True,
+    },
+}
+
+
+def is_species_allowed(stream_id: str, species: str) -> bool:
+    """Evaluate whether a detected species is permissible on the given stream."""
+    if not stream_id or not species:
+        return True
+    cfg = stream_allowlists.get(stream_id)
+    if not cfg or not cfg.get("strict_filtering", False):
+        return True
+    allowed_list = cfg.get("allowed_species", [])
+    sp_norm = species.strip().lower().replace("_", " ")
+    for a in allowed_list:
+        a_norm = a.strip().lower().replace("_", " ")
+        if a_norm in sp_norm or sp_norm in a_norm:
+            return True
+    return False
+
+
 alert_rules: List[AlertRule] = [
     AlertRule(species="brown_bear", min_confidence=0.80),
     AlertRule(species="bald_eagle", min_confidence=0.75),
@@ -258,10 +323,20 @@ async def get_webhook_history(limit: int = 20):
     return alert_dispatcher.dispatch_history[-limit:]
 
 
-@app.post("/api/events", status_code=201)
-async def ingest_event(event: DetectionEvent):
-    """Ingest a detection event from the 4090 CV runner and broadcast to SSE subscribers."""
+def process_event(event: DetectionEvent) -> dict:
+    """Internal event ingestion engine: enforces species allowlist, aggregates stats, and broadcasts via SSE."""
     global total_events_dispatched
+
+    # Species allowlist check
+    if not is_species_allowed(event.stream_id, event.species):
+        return {
+            "status": "filtered",
+            "filtered": True,
+            "event_id": event.event_id,
+            "stream_id": event.stream_id,
+            "species": event.species,
+            "reason": f"Species '{event.species}' filtered by allowlist for stream '{event.stream_id}'",
+        }
 
     # Update stream state
     if event.stream_id not in stream_telemetry:
@@ -336,6 +411,107 @@ async def ingest_event(event: DetectionEvent):
         subscribers.discard(dq)
 
     return {"status": "broadcasted", "event_id": event.event_id, "subscribers": len(subscribers)}
+
+
+@app.post("/api/events", status_code=201)
+async def ingest_event(event: DetectionEvent, response: Response):
+    """Ingest a detection event from edge runners (4090/CUDA) and broadcast to SSE subscribers."""
+    res = process_event(event)
+    if res.get("status") == "filtered":
+        response.status_code = 200
+    return res
+
+
+@app.post("/api/snapshots/upload")
+async def upload_snapshot(
+    file: UploadFile = File(...),
+    event_id: Optional[str] = Form(None),
+    stream_id: Optional[str] = Form(None),
+):
+    """Save an edge-captured snapshot JPEG to the Outpost static storage."""
+    evt_id = event_id or f"evt_{uuid.uuid4().hex[:8]}"
+    today_str = time.strftime("%Y%m%d")
+    day_dir = SNAPSHOTS_DIR / today_str
+    day_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(file.filename or "frame.jpg").suffix.lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        ext = ".jpg"
+    dest_path = day_dir / f"{evt_id}{ext}"
+
+    content = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    rel_url = f"/snapshots/{today_str}/{evt_id}{ext}"
+    return {
+        "status": "uploaded",
+        "event_id": evt_id,
+        "stream_id": stream_id,
+        "snapshot_url": rel_url,
+        "size_bytes": len(content),
+    }
+
+
+@app.post("/api/events/upload", status_code=201)
+async def ingest_event_with_snapshot(
+    file: UploadFile = File(...),
+    event_data: str = Form(...),
+    response: Response = None,
+):
+    """Multipart ingestion: saves snapshot file and processes DetectionEvent atomically."""
+    try:
+        data = json.loads(event_data)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid event_data JSON: {e}")
+
+    evt = DetectionEvent(**data)
+
+    today_str = time.strftime("%Y%m%d")
+    day_dir = SNAPSHOTS_DIR / today_str
+    day_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "frame.jpg").suffix.lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        ext = ".jpg"
+    dest_path = day_dir / f"{evt.event_id}{ext}"
+
+    content = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    evt.snapshot_url = f"/snapshots/{today_str}/{evt.event_id}{ext}"
+    res = process_event(evt)
+    res["snapshot_url"] = evt.snapshot_url
+    if res.get("status") == "filtered" and response:
+        response.status_code = 200
+    return res
+
+
+@app.get("/api/streams/allowlists")
+async def get_stream_allowlists():
+    """Retrieve all configured stream species allowlists."""
+    return stream_allowlists
+
+
+@app.get("/api/streams/{stream_id}/allowlist")
+async def get_single_stream_allowlist(stream_id: str):
+    """Retrieve species allowlist configuration for a specific stream."""
+    if stream_id not in stream_allowlists:
+        return {"stream_id": stream_id, "allowed_species": [], "strict_filtering": False}
+    return stream_allowlists[stream_id]
+
+
+@app.post("/api/streams/{stream_id}/allowlist")
+async def update_stream_allowlist(stream_id: str, payload: Dict[str, Any]):
+    """Update or register species allowlist for a stream."""
+    allowed = payload.get("allowed_species", [])
+    strict = payload.get("strict_filtering", True)
+    stream_allowlists[stream_id] = {
+        "stream_id": stream_id,
+        "allowed_species": allowed,
+        "strict_filtering": strict,
+    }
+    return stream_allowlists[stream_id]
 
 
 @app.get("/events")

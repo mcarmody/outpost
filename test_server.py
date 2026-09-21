@@ -23,6 +23,10 @@ def reset_state():
     subscribers.clear()
     species_stats.clear()
     recent_alerts.clear()
+    for st in stream_telemetry.values():
+        st["total_detections"] = 0
+        st["status"] = "idle"
+        st["last_detection"] = None
 
 
 def test_health_check():
@@ -326,6 +330,109 @@ def test_hardware_diagnostics_and_supervisor():
     health_data = health_resp.json()
     assert "hardware" in health_data
     assert "cuda_available" in health_data["hardware"]
+
+
+def test_stream_species_allowlist_filtering():
+    client = TestClient(app)
+
+    # 1. Allowed species on cornell_feeder_01
+    allowed_resp = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "Northern Cardinal",
+        "confidence": 0.88,
+        "bbox": [10, 10, 50, 50],
+    })
+    assert allowed_resp.status_code == 201
+    assert allowed_resp.json()["status"] == "broadcasted"
+
+    # 2. Out-of-domain generic COCO hallucination (e.g. bear on a feeder) -> filtered
+    filtered_resp = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "bear",
+        "confidence": 0.78,
+        "bbox": [10, 10, 50, 50],
+    })
+    assert filtered_resp.status_code == 200
+    f_data = filtered_resp.json()
+    assert f_data["status"] == "filtered"
+    assert f_data["filtered"] is True
+    assert "filtered by allowlist" in f_data["reason"]
+
+    # 3. But bear on katmai_brooks_01 IS allowed
+    katmai_resp = client.post("/api/events", json={
+        "stream_id": "katmai_brooks_01",
+        "species": "brown_bear",
+        "confidence": 0.85,
+        "bbox": [10, 10, 50, 50],
+    })
+    assert katmai_resp.status_code == 201
+    assert katmai_resp.json()["status"] == "broadcasted"
+
+    # Verify ring buffer only contains the 2 allowed events
+    rec_res = client.get("/events/recent")
+    events = rec_res.json()
+    assert len(events) == 2
+    assert {e["species"] for e in events} == {"Northern Cardinal", "brown_bear"}
+
+
+def test_allowlist_management_endpoints():
+    client = TestClient(app)
+
+    # Fetch all allowlists
+    resp = client.get("/api/streams/allowlists")
+    assert resp.status_code == 200
+    assert "cornell_feeder_01" in resp.json()
+
+    # Fetch single stream allowlist
+    resp2 = client.get("/api/streams/cornell_feeder_01/allowlist")
+    assert resp2.status_code == 200
+    assert "bird" in resp2.json()["allowed_species"]
+
+    # Update allowlist
+    resp3 = client.post("/api/streams/custom_stream_99/allowlist", json={
+        "allowed_species": ["hawk", "falcon"],
+        "strict_filtering": True,
+    })
+    assert resp3.status_code == 200
+    assert resp3.json()["allowed_species"] == ["hawk", "falcon"]
+
+
+def test_snapshot_upload_endpoint():
+    client = TestClient(app)
+    dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb"
+
+    files = {"file": ("test_frame.jpg", dummy_jpeg, "image/jpeg")}
+    data = {"event_id": "evt_upload_123", "stream_id": "cornell_feeder_01"}
+    resp = client.post("/api/snapshots/upload", files=files, data=data)
+    assert resp.status_code == 200
+    res_data = resp.json()
+    assert res_data["status"] == "uploaded"
+    assert "evt_upload_123.jpg" in res_data["snapshot_url"]
+    assert res_data["size_bytes"] == len(dummy_jpeg)
+
+
+def test_multipart_event_upload_endpoint():
+    client = TestClient(app)
+    dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb"
+    event_payload = {
+        "event_id": "evt_multipart_456",
+        "stream_id": "cornell_feeder_01",
+        "species": "Blue Jay",
+        "confidence": 0.94,
+        "bbox": [20, 20, 100, 100],
+    }
+
+    files = {"file": ("jay.jpg", dummy_jpeg, "image/jpeg")}
+    data = {"event_data": json.dumps(event_payload)}
+    resp = client.post("/api/events/upload", files=files, data=data)
+    assert resp.status_code == 201
+    res_data = resp.json()
+    assert res_data["status"] == "broadcasted"
+    assert "evt_multipart_456.jpg" in res_data["snapshot_url"]
+
+    # Verify recent events has the uploaded snapshot URL
+    rec = client.get("/events/recent").json()
+    assert any(e["event_id"] == "evt_multipart_456" and "evt_multipart_456.jpg" in e["snapshot_url"] for e in rec)
 
 
 
