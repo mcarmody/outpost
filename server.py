@@ -143,6 +143,49 @@ async def trigger_prune(max_age_hours: float = 24.0, max_storage_mb: float = 500
     return {"status": "success", **res}
 
 
+@app.get("/metrics", response_class=Response)
+async def prometheus_metrics():
+    """Exposes Prometheus text exposition format metrics for scraping."""
+    snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
+    uptime = round(time.time() - start_time, 2)
+    storage_bytes = int(snap_stats["total_mb"] * 1024 * 1024)
+
+    lines = [
+        "# HELP outpost_uptime_seconds Total runtime of Outpost telemetry server in seconds",
+        "# TYPE outpost_uptime_seconds gauge",
+        f"outpost_uptime_seconds {uptime}",
+        "# HELP outpost_events_dispatched_total Cumulative detection events dispatched",
+        "# TYPE outpost_events_dispatched_total counter",
+        f"outpost_events_dispatched_total {total_events_dispatched}",
+        "# HELP outpost_sse_subscribers_active Current active SSE client connections",
+        "# TYPE outpost_sse_subscribers_active gauge",
+        f"outpost_sse_subscribers_active {len(subscribers)}",
+        "# HELP outpost_ring_buffer_depth Current depth of in-memory recent events buffer",
+        "# TYPE outpost_ring_buffer_depth gauge",
+        f"outpost_ring_buffer_depth {len(recent_events)}",
+        "# HELP outpost_snapshot_storage_bytes Total disk space occupied by snapshots",
+        "# TYPE outpost_snapshot_storage_bytes gauge",
+        f"outpost_snapshot_storage_bytes {storage_bytes}",
+        "# HELP outpost_snapshot_files_total Total count of snapshot JPEG files on disk",
+        "# TYPE outpost_snapshot_files_total gauge",
+        f"outpost_snapshot_files_total {snap_stats['total_files']}",
+        "# HELP outpost_alerts_triggered_total Total high-priority target alerts recorded",
+        "# TYPE outpost_alerts_triggered_total counter",
+        f"outpost_alerts_triggered_total {len(recent_alerts)}",
+    ]
+
+    for sp, info in species_stats.items():
+        lines.append(f'outpost_species_sightings_total{{species="{sp}"}} {info["count"]}')
+
+    for sid, st in stream_telemetry.items():
+        val = 1 if st.get("status") == "active" else 0
+        lines.append(f'outpost_stream_status{{stream_id="{sid}"}} {val}')
+
+    output = "\n".join(lines) + "\n"
+    return Response(content=output, media_type="text/plain; version=0.0.4")
+
+
+
 @app.get("/events/recent", response_model=List[DetectionEvent])
 async def get_recent_events(limit: int = 50):
     """Retrieve recent detection events from the ring buffer."""

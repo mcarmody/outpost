@@ -291,4 +291,25 @@ def test_stream_watchdog_and_failover():
     assert api_data["mode"] == "fallback_synthetic"
 
 
+def test_prometheus_metrics():
+    client = TestClient(app)
+    # Ingest event to populate counters
+    client.post("/api/events", json={
+        "stream_id": "anacapa_kelp_01",
+        "species": "garibaldi",
+        "confidence": 0.92,
+        "bbox": [10, 10, 50, 50],
+    })
+
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    body = resp.text
+    assert "outpost_uptime_seconds" in body
+    assert "outpost_events_dispatched_total" in body
+    assert "outpost_snapshot_storage_bytes" in body
+    assert 'outpost_species_sightings_total{species="garibaldi"}' in body
+
+
+
 
