@@ -233,6 +233,10 @@
           const preview = document.getElementById(`${evt.stream_id}-preview`);
           const placeholder = document.getElementById(`${evt.stream_id}-placeholder`);
           if (preview && placeholder) {
+            preview.onerror = () => {
+              preview.classList.add('hidden');
+              placeholder.classList.remove('hidden');
+            };
             preview.src = `${API_BASE}${evt.snapshot_url}`;
             preview.classList.remove('hidden');
             placeholder.classList.add('hidden');
@@ -279,7 +283,10 @@
     }
 
     // Hydrate event feed and stream tiles from ring buffer on initial page load
+    let hasBackfilled = false;
     async function backfillRecentEvents() {
+      if (hasBackfilled) return;
+      hasBackfilled = true;
       try {
         const res = await fetch(`${API_BASE}/events/recent?limit=40`);
         if (!res.ok) return;
@@ -292,11 +299,12 @@
       }
     }
 
+    // Unconditional immediate invocation + load listener fallbacks
+    backfillRecentEvents();
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', backfillRecentEvents);
-    } else {
-      backfillRecentEvents();
     }
+    window.addEventListener('load', backfillRecentEvents);
 
     // Audio Alert Chime & Controls
     let audioAlertEnabled = true;
