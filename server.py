@@ -111,7 +111,7 @@ recent_alerts: deque = deque(maxlen=50)
 alert_dispatcher = AlertDispatcher(default_cooldown_seconds=300.0)
 stream_watchdog = StreamWatchdog()
 stream_watchdog.register_stream("anacapa_kelp_01", "https://www.youtube.com/watch?v=OAJF1Ie1m_Q", "Explore.org")
-stream_watchdog.register_stream("cornell_feeder_01", "https://www.youtube.com/watch?v=N609loYkFJo", "Cornell Lab")
+stream_watchdog.register_stream("cornell_feeder_01", "https://www.youtube.com/watch?v=x10vL6_47Dw", "Cornell Lab")
 stream_watchdog.register_stream("katmai_brooks_01", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
 
 # In-memory ring buffer of recent events (depth: 200)
