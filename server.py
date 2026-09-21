@@ -147,12 +147,19 @@ stream_allowlists: Dict[str, Dict[str, Any]] = {
     },
     "anacapa_kelp_01": {
         "stream_id": "anacapa_kelp_01",
-        "allowed_species": [
-            "fish", "garibaldi", "california sheephead", "sheephead",
-            "giant kelp bass", "giant sea bass", "kelp bass", "sea bass", "bass",
-            "harbor seal", "seal", "california sea lion", "sea lion",
-            "bat ray", "ray", "leopard shark", "shark", "scuba diver", "diver", "marine_life",
-        ],
+        # yolo11x.pt is COCO-trained, and COCO's 80 classes include no fish,
+        # seal, shark, or ray — a strict allowlist of marine species (the
+        # original list here) can NEVER match anything the model actually
+        # emits, so the tile stays permanently empty regardless of whether
+        # the stream itself is healthy. Confirmed live 2026-09-21: real
+        # detections on this feed are COCO-generic misreads ("frisbee",
+        # "broccoli" — light/kelp shapes), all correctly filtered, leaving
+        # zero events ever landing. Narrowed to the only COCO classes that
+        # could plausibly and correctly appear here (a diver as "person", a
+        # passing vessel as "boat") until a marine-aware model (BioCLIP /
+        # a fine-tuned detector — tracked as Outpost issue #2) replaces
+        # generic COCO for this stream specifically.
+        "allowed_species": ["person", "boat"],
         "strict_filtering": True,
     },
     "katmai_brooks_01": {

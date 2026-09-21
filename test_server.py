@@ -52,7 +52,7 @@ def test_ingest_and_recent_events():
     payload = {
         "event_id": "evt_test_01",
         "stream_id": "anacapa_kelp_01",
-        "species": "garibaldi",
+        "species": "person",
         "confidence": 0.92,
         "bbox": [100, 200, 150, 280],
         "metadata": {"water_temp_c": 18.5},
@@ -68,7 +68,7 @@ def test_ingest_and_recent_events():
     assert rec_res.status_code == 200
     events = rec_res.json()
     assert len(events) == 1
-    assert events[0]["species"] == "garibaldi"
+    assert events[0]['species'] == 'person'
     assert events[0]["confidence"] == 0.92
 
 
@@ -76,13 +76,13 @@ def test_streams_and_species_stats():
     client = TestClient(app)
     payload1 = {
         "stream_id": "anacapa_kelp_01",
-        "species": "giant_sea_bass",
+        "species": "person",
         "confidence": 0.88,
         "bbox": [50, 50, 200, 200],
     }
     payload2 = {
         "stream_id": "anacapa_kelp_01",
-        "species": "giant_sea_bass",
+        "species": "person",
         "confidence": 0.94,
         "bbox": [60, 60, 210, 210],
     }
@@ -102,7 +102,7 @@ def test_streams_and_species_stats():
     assert stats_res.status_code == 200
     stats = stats_res.json()
     assert len(stats) >= 1
-    bass = next(s for s in stats if s["species"] == "giant_sea_bass")
+    bass = next(s for s in stats if s["species"] == "person")
     assert bass["count"] == 2
     assert bass["peak_confidence"] == 0.94
 
@@ -300,7 +300,7 @@ def test_prometheus_metrics():
     # Ingest event to populate counters
     client.post("/api/events", json={
         "stream_id": "anacapa_kelp_01",
-        "species": "garibaldi",
+        "species": "person",
         "confidence": 0.92,
         "bbox": [10, 10, 50, 50],
     })
@@ -312,7 +312,7 @@ def test_prometheus_metrics():
     assert "outpost_uptime_seconds" in body
     assert "outpost_events_dispatched_total" in body
     assert "outpost_snapshot_storage_bytes" in body
-    assert 'outpost_species_sightings_total{species="garibaldi"}' in body
+    assert 'outpost_species_sightings_total{species="person"}' in body
 
 
 def test_hardware_diagnostics_and_supervisor():

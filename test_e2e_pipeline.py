@@ -45,7 +45,7 @@ def test_e2e_synthetic_generation_ingest_and_static_serving():
     # 1. Generate realistic synthetic snapshot frame
     event_id = f"e2e_evt_{int(time.time())}"
     stream_id = "anacapa_kelp_01"
-    species = "Garibaldi"
+    species = "person"
     confidence = 0.94
     bbox = [120, 80, 260, 200]
     bg_color = STREAMS[stream_id]["bg_color"]
