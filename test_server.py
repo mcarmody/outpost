@@ -311,5 +311,23 @@ def test_prometheus_metrics():
     assert 'outpost_species_sightings_total{species="garibaldi"}' in body
 
 
+def test_hardware_diagnostics_and_supervisor():
+    client = TestClient(app)
+    resp = client.get("/api/supervisor")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "cuda_available" in data
+    assert "device_name" in data
+    assert "recommended_mode" in data
+
+    # Verify health response includes hardware section
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200
+    health_data = health_resp.json()
+    assert "hardware" in health_data
+    assert "cuda_available" in health_data["hardware"]
+
+
+
 
 

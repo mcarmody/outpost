@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from alerts_dispatcher import AlertDispatcher
 from retention import get_snapshots_storage_stats, prune_snapshots
 from stream_watchdog import StreamWatchdog
+from supervisor import get_hardware_diagnostics
 
 SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -123,6 +124,7 @@ start_time = time.time()
 async def health_check():
     """System telemetry and active subscriber metrics."""
     snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
+    hw = get_hardware_diagnostics()
     return {
         "status": "online",
         "service": "outpost-telemetry-bus",
@@ -133,7 +135,15 @@ async def health_check():
         "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
         "snapshot_storage_mb": snap_stats["total_mb"],
         "snapshot_files_count": snap_stats["total_files"],
+        "hardware": hw,
     }
+
+
+@app.get("/api/supervisor")
+async def get_supervisor_status():
+    """Returns supervisor hardware capability diagnostics and recommended execution mode."""
+    return get_hardware_diagnostics()
+
 
 
 @app.post("/api/maintenance/prune")
