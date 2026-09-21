@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Outpost — Ops Room</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @keyframes pulse-border {
+      0%, 100% { border-color: rgb(51, 65, 85); }
+      50% { border-color: rgb(16, 185, 129); }
+    }
+    .detection-flash {
+      animation: pulse-border 1.5s ease-in-out;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navigation / HUD -->
+  <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between z-10">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+        <i class="fa-solid fa-satellite-dish"></i>
+      </div>
+      <div>
+        <h1 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">Project Outpost <span class="text-xs font-normal text-slate-400">· Ops Room</span></h1>
+      </div>
+    </div>
+
+    <!-- Telemetry Stats -->
+    <div class="hidden md:flex items-center space-x-6 text-xs text-slate-400">
+      <div>Streams: <span class="font-mono font-medium text-slate-200" id="stat-streams">3 Active</span></div>
+      <div>Detections: <span class="font-mono font-medium text-slate-200" id="stat-detections">0</span></div>
+      <div>Species Seen: <span class="font-mono font-medium text-slate-200" id="stat-species">0</span></div>
+      <div>Throughput: <span class="font-mono font-medium text-emerald-400" id="stat-fps">~120 FPS (4090)</span></div>
+    </div>
+
+    <!-- Connection Status Pill -->
+    <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="status-indicator"></span>
+        <span class="font-mono text-slate-300" id="status-text">Connecting...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Viewport -->
+  <main class="flex-1 flex overflow-hidden">
+
+    <!-- Left: Surveillance Multi-Stream Grid -->
+    <section class="flex-1 p-4 overflow-y-auto">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full">
+
+        <!-- Stream 1: Anacapa Kelp Forest -->
+        <div id="tile-anacapa_kelp_01" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
+          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="font-medium text-slate-200">Anacapa Island Kelp Forest</span>
+              <span class="text-slate-500">· Explore.org</span>
+            </div>
+            <span class="text-slate-400 font-mono text-[11px]" id="anacapa_kelp_01-last-seen">No detections yet</span>
+          </div>
+          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+            <img id="anacapa_kelp_01-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
+            <div id="anacapa_kelp_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+              <i class="fa-solid fa-water text-3xl"></i>
+              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            </div>
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-cyan-300 hidden" id="anacapa_kelp_01-tag">
+              <span id="anacapa_kelp_01-label"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stream 2: Cornell FeederWatch -->
+        <div id="tile-cornell_feeder_01" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
+          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="font-medium text-slate-200">Cornell Lab FeederWatch</span>
+              <span class="text-slate-500">· Cornell Lab</span>
+            </div>
+            <span class="text-slate-400 font-mono text-[11px]" id="cornell_feeder_01-last-seen">No detections yet</span>
+          </div>
+          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+            <img id="cornell_feeder_01-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
+            <div id="cornell_feeder_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+              <i class="fa-solid fa-dove text-3xl"></i>
+              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            </div>
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-amber-300 hidden" id="cornell_feeder_01-tag">
+              <span id="cornell_feeder_01-label"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stream 3: Katmai Brooks Falls -->
+        <div id="tile-katmai_brooks_falls" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
+          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="font-medium text-slate-200">Katmai Brooks Falls (Bears)</span>
+              <span class="text-slate-500">· Explore.org</span>
+            </div>
+            <span class="text-slate-400 font-mono text-[11px]" id="katmai_brooks_falls-last-seen">No detections yet</span>
+          </div>
+          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+            <img id="katmai_brooks_falls-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
+            <div id="katmai_brooks_falls-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+              <i class="fa-solid fa-mountain text-3xl"></i>
+              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            </div>
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-emerald-300 hidden" id="katmai_brooks_falls-tag">
+              <span id="katmai_brooks_falls-label"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stream 4: Control / Target Species Watcher -->
+        <div class="flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 p-4 justify-between">
+          <div>
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">Species Watcher & Alert Target</h2>
+            <p class="text-xs text-slate-400 mb-4">Choose priority target species to highlight when sighted across any live feed.</p>
+
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">Target Priority Species:</label>
+            <select id="target-species-select" class="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+              <option value="ALL">All Species (No Filter)</option>
+              <option value="Garibaldi">Garibaldi (California State Marine Fish)</option>
+              <option value="Brown Bear">Brown Bear</option>
+              <option value="Bald Eagle">Bald Eagle</option>
+              <option value="Northern Cardinal">Northern Cardinal</option>
+              <option value="Giant Kelp Bass">Giant Kelp Bass</option>
+            </select>
+          </div>
+
+          <div class="pt-4 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
+            <span>Hardware: NVIDIA RTX 4090 · TensorRT FP16</span>
+            <span class="text-indigo-400 font-mono">SSE Bus: :8000/events</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Right: Real-Time Event Ticker Feed -->
+    <aside class="w-80 border-l border-slate-800 bg-slate-900/40 flex flex-col">
+      <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+        <h2 class="text-xs font-semibold tracking-wide text-slate-300 uppercase">Live Telemetry Feed</h2>
+        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">SSE</span>
+      </div>
+
+      <div id="event-feed" class="flex-1 p-2 space-y-2 overflow-y-auto">
+        <!-- Events will dynamically append here -->
+      </div>
+    </aside>
+
+  </main>
+
+  <script>
+    const statusIndicator = document.getElementById('status-indicator');
+    const statusText = document.getElementById('status-text');
+    const eventFeed = document.getElementById('event-feed');
+    const statDetections = document.getElementById('stat-detections');
+    const statSpecies = document.getElementById('stat-species');
+    const targetSelect = document.getElementById('target-species-select');
+
+    let totalDetections = 0;
+    const seenSpecies = new Set();
+
+    // Determine host origin for SSE connection
+    const API_BASE = window.location.origin.includes('8000') ? '' : 'http://localhost:8000';
+    const evtSource = new EventSource(`${API_BASE}/events`);
+
+    evtSource.addEventListener('connected', (e) => {
+      statusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500';
+      statusText.textContent = 'Online · SSE Hot';
+    });
+
+    evtSource.addEventListener('detection', (e) => {
+      const data = JSON.parse(e.data);
+      handleDetection(data);
+    });
+
+    evtSource.onerror = () => {
+      statusIndicator.className = 'w-2 h-2 rounded-full bg-rose-500';
+      statusText.textContent = 'Disconnected · Retrying';
+    };
+
+    function handleDetection(evt) {
+      totalDetections++;
+      seenSpecies.add(evt.species);
+      statDetections.textContent = totalDetections;
+      statSpecies.textContent = seenSpecies.size;
+
+      // Update Stream Tile
+      const tile = document.getElementById(`tile-${evt.stream_id}`);
+      if (tile) {
+        tile.classList.remove('detection-flash');
+        void tile.offsetWidth; // trigger reflow
+        tile.classList.add('detection-flash');
+
+        const lastSeen = document.getElementById(`${evt.stream_id}-last-seen`);
+        if (lastSeen) lastSeen.textContent = `${evt.species} (${Math.round(evt.confidence * 100)}%)`;
+
+        const tag = document.getElementById(`${evt.stream_id}-tag`);
+        const label = document.getElementById(`${evt.stream_id}-label`);
+        if (tag && label) {
+          label.textContent = `${evt.species} · ${Math.round(evt.confidence * 100)}%`;
+          tag.classList.remove('hidden');
+        }
+
+        if (evt.snapshot_url) {
+          const preview = document.getElementById(`${evt.stream_id}-preview`);
+          const placeholder = document.getElementById(`${evt.stream_id}-placeholder`);
+          if (preview && placeholder) {
+            preview.src = `${API_BASE}${evt.snapshot_url}`;
+            preview.classList.remove('hidden');
+            placeholder.classList.add('hidden');
+          }
+        }
+      }
+
+      // Check target filter
+      const filter = targetSelect.value;
+      const isTarget = (filter !== 'ALL' && filter === evt.species);
+
+      // Append to Ticker Feed
+      const card = document.createElement('div');
+      card.className = `p-2.5 rounded border text-xs transition-all ${
+        isTarget
+          ? 'bg-indigo-950/40 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-950/50'
+          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-200'
+      }`;
+
+      const timeStr = new Date().toLocaleTimeString();
+      card.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="font-semibold text-slate-100">${evt.species}</span>
+          <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">${Math.round(evt.confidence * 100)}%</span>
+        </div>
+        <div class="text-[11px] text-slate-400 flex items-center justify-between">
+          <span class="truncate max-w-[140px]">${evt.stream_id}</span>
+          <span class="font-mono text-[10px] text-slate-500">${timeStr}</span>
+        </div>
+      `;
+
+      eventFeed.insertBefore(card, eventFeed.firstChild);
+
+      // Keep max 40 items in DOM
+      if (eventFeed.children.length > 40) {
+        eventFeed.removeChild(eventFeed.lastChild);
+      }
+    }
+  </script>
+</body>
+</html>

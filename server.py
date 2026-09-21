@@ -19,12 +19,13 @@ from typing import Any, Dict, List, Optional, Set
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+INDEX_HTML = Path("/workspace/scratch/outpost/index.html")
 
 app = FastAPI(
     title="Outpost Wildlife CV Telemetry Bus",
@@ -43,6 +44,14 @@ app.add_middleware(
 
 # Static file mount for snapshot JPEG frames
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
+
+
+@app.get("/", response_class=FileResponse)
+async def root_dashboard():
+    """Serves the single-page Ops Room surveillance frontend."""
+    if INDEX_HTML.exists():
+        return FileResponse(str(INDEX_HTML))
+    return {"message": "Project Outpost Telemetry Bus Online"}
 
 
 class DetectionEvent(BaseModel):

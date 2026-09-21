@@ -25,6 +25,13 @@ def test_health_check():
     assert "ring_buffer_depth" in data
 
 
+def test_root_dashboard():
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Project Outpost" in response.text
+
+
 def test_ingest_and_recent_events():
     client = TestClient(app)
     payload = {
