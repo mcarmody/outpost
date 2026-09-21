@@ -267,3 +267,28 @@ def test_webhook_alert_dispatch():
     assert len(hist_res2.json()) == 1
 
 
+def test_stream_watchdog_and_failover():
+    client = TestClient(app)
+    from server import stream_watchdog
+
+    # Check watchdog status endpoint
+    resp = client.get("/api/streams/watchdog")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 3
+    streams = {s["stream_id"]: s for s in data}
+    assert "anacapa_kelp_01" in streams
+
+    # Register a synthetic/mock stream that triggers failover
+    stream_watchdog.register_stream("test_mock_stream", "mock://offline_url", "Test Provider")
+    res = stream_watchdog.resolve_stream_url("test_mock_stream")
+    assert res["mode"] == "fallback_synthetic"
+
+    # Trigger resolution via API endpoint
+    api_res = client.post("/api/streams/test_mock_stream/resolve")
+    assert api_res.status_code == 200
+    api_data = api_res.json()
+    assert api_data["mode"] == "fallback_synthetic"
+
+
+

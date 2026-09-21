@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from alerts_dispatcher import AlertDispatcher
 from retention import get_snapshots_storage_stats, prune_snapshots
+from stream_watchdog import StreamWatchdog
 
 SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -106,6 +107,10 @@ alert_rules: List[AlertRule] = [
 ]
 recent_alerts: deque = deque(maxlen=50)
 alert_dispatcher = AlertDispatcher(default_cooldown_seconds=300.0)
+stream_watchdog = StreamWatchdog()
+stream_watchdog.register_stream("anacapa_kelp_01", "https://www.youtube.com/watch?v=bZ_S8kP_hLg", "Explore.org")
+stream_watchdog.register_stream("cornell_feeder_01", "https://www.youtube.com/watch?v=N609loYkFJo", "Cornell Lab")
+stream_watchdog.register_stream("katmai_brooks_01", "https://www.youtube.com/watch?v=761ae_KDg_Q", "Explore.org")
 
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
@@ -149,6 +154,23 @@ async def get_recent_events(limit: int = 50):
 async def get_streams():
     """Retrieve all monitored streams and their live telemetry status."""
     return list(stream_telemetry.values())
+
+
+@app.get("/api/streams/watchdog")
+async def get_watchdog_status():
+    """Retrieve stream health and failover status from the watchdog."""
+    return stream_watchdog.get_watchdog_status()
+
+
+@app.post("/api/streams/{stream_id}/resolve")
+async def resolve_stream(stream_id: str, quality: str = "720p", force: bool = False):
+    """Triggers on-demand streamlink resolution with synthetic failover."""
+    try:
+        res = stream_watchdog.resolve_stream_url(stream_id, quality=quality, force=force)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 
 @app.get("/api/stats/species")
