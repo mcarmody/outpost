@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from alerts_dispatcher import AlertDispatcher
 from retention import get_snapshots_storage_stats, prune_snapshots
 
 SNAPSHOTS_DIR = Path("/workspace/scratch/outpost/snapshots")
@@ -104,6 +105,7 @@ alert_rules: List[AlertRule] = [
     AlertRule(species="bald_eagle", min_confidence=0.75),
 ]
 recent_alerts: deque = deque(maxlen=50)
+alert_dispatcher = AlertDispatcher(default_cooldown_seconds=300.0)
 
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
@@ -174,6 +176,12 @@ async def get_recent_alerts(limit: int = 20):
     return list(recent_alerts)[-limit:]
 
 
+@app.get("/api/alerts/webhooks")
+async def get_webhook_history(limit: int = 20):
+    """Retrieve recent webhook dispatch history."""
+    return alert_dispatcher.dispatch_history[-limit:]
+
+
 @app.post("/api/events", status_code=201)
 async def ingest_event(event: DetectionEvent):
     """Ingest a detection event from the 4090 CV runner and broadcast to SSE subscribers."""
@@ -226,6 +234,13 @@ async def ingest_event(event: DetectionEvent):
                 recent_alerts.append(alert_entry)
                 event.metadata["alert_triggered"] = True
                 event.metadata["matched_rule_id"] = rule.rule_id
+
+                # Dispatch webhook via AlertDispatcher
+                dispatch_res = alert_dispatcher.dispatch(
+                    event.model_dump(),
+                    stream_info=stream_telemetry.get(event.stream_id),
+                )
+                event.metadata["webhook_dispatch"] = dispatch_res
                 break
 
     recent_events.append(event)

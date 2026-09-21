@@ -229,3 +229,41 @@ def test_maintenance_prune_endpoint():
     assert "pruned_files" in data
     assert "freed_mb" in data
 
+
+def test_webhook_alert_dispatch():
+    client = TestClient(app)
+    from server import alert_dispatcher
+
+    alert_dispatcher.last_dispatched.clear()
+    alert_dispatcher.dispatch_history.clear()
+
+    # Trigger alert for bald_eagle
+    res = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "bald_eagle",
+        "confidence": 0.95,
+        "bbox": [100, 100, 400, 400],
+    })
+    assert res.status_code == 201
+
+    # Check webhook history endpoint
+    hist_res = client.get("/api/alerts/webhooks")
+    assert hist_res.status_code == 200
+    history = hist_res.json()
+    assert len(history) == 1
+    assert history[0]["species"] == "bald_eagle"
+    assert history[0]["delivered"] is True
+
+    # Immediate second detection of same species should be rate-limited
+    res2 = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "bald_eagle",
+        "confidence": 0.96,
+        "bbox": [105, 105, 410, 410],
+    })
+    assert res2.status_code == 201
+    # History length should still be 1 because it was rate-limited
+    hist_res2 = client.get("/api/alerts/webhooks")
+    assert len(hist_res2.json()) == 1
+
+
