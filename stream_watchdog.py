@@ -150,7 +150,7 @@ class StreamWatchdog:
 
 if __name__ == "__main__":
     wd = StreamWatchdog()
-    wd.register_stream("anacapa_kelp_01", "https://www.youtube.com/watch?v=bZ_S8kP_hLg", "Explore.org")
+    wd.register_stream("anacapa_kelp_01", "https://www.youtube.com/watch?v=OAJF1Ie1m_Q", "Explore.org")
     wd.register_stream("cornell_feeder_01", "mock://unreachable_feed", "Cornell Lab")
 
     print("[*] Resolving test streams:")

@@ -137,7 +137,7 @@ def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", type=str, default="https://www.youtube.com/watch?v=bZ_S8kP_hLg", help="YouTube/Explore stream URL")
+    parser.add_argument("--url", type=str, default="https://www.youtube.com/watch?v=OAJF1Ie1m_Q", help="YouTube/Explore stream URL")
     parser.add_argument("--stream-id", type=str, default="anacapa_kelp_01", help="Identifier for stream")
     parser.add_argument("--model", type=str, default="yolo11x.pt", help="YOLO model or checkpoint")
     parser.add_argument("--api-url", type=str, default="http://localhost:8000", help="Outpost FastAPI telemetry server URL")
