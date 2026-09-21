@@ -90,3 +90,20 @@ async def test_sse_subscriber_broadcast():
     assert msg_data["event_id"] == "evt_broadcast_01"
     assert msg_data["species"] == "blue_jay"
     subscribers.discard(queue)
+
+
+def test_simulate_event_integration():
+    from simulate import simulate_event
+    client = TestClient(app)
+    payload = simulate_event(api_url=None)
+    assert payload["species"]
+    assert payload["snapshot_url"].startswith("/snapshots/")
+
+    # Ingest into server
+    resp = client.post("/api/events", json=payload)
+    assert resp.status_code == 201
+
+    # Verify snapshot static endpoint returns the image
+    snap_resp = client.get(payload["snapshot_url"])
+    assert snap_resp.status_code == 200
+    assert "image" in snap_resp.headers.get("content-type", "")
