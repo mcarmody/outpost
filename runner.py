@@ -10,6 +10,7 @@ Usage:
 import argparse
 import json
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -92,41 +93,63 @@ def dispatch_event(
             print(f"[!] Warning: Failed to dispatch event to {api_url}: {e}")
 
 
-def register_hardware(api_url: Optional[str], stream_id: str):
-    """Report this box's real GPU to the relay server so /health and
-    /api/supervisor stop describing the (CPU-only) relay itself as
-    'the hardware' while this runner is doing the actual CUDA inference."""
+def _hardware_payload(stream_id: str) -> dict:
+    import platform
+    import socket
+    import torch
+    cuda_available = torch.cuda.is_available()
+    device_name = torch.cuda.get_device_name(0) if cuda_available else "CPU Only"
+    total_vram_gb = (
+        round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
+        if cuda_available else 0.0
+    )
+    return {
+        "stream_id": stream_id,
+        "cuda_available": cuda_available,
+        "device_name": device_name,
+        "total_vram_gb": total_vram_gb,
+        "hostname": f"{socket.gethostname()} ({platform.system()})",
+    }
+
+
+def register_hardware_once(api_url: Optional[str], stream_id: str) -> bool:
+    """Single hardware registration attempt. Returns True on confirmed success."""
     if not api_url:
-        return
+        return False
     try:
-        import platform
-        import socket
-        import torch
-        cuda_available = torch.cuda.is_available()
-        device_name = torch.cuda.get_device_name(0) if cuda_available else "CPU Only"
-        total_vram_gb = (
-            round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
-            if cuda_available else 0.0
-        )
-        payload = {
-            "stream_id": stream_id,
-            "cuda_available": cuda_available,
-            "device_name": device_name,
-            "total_vram_gb": total_vram_gb,
-            "hostname": f"{socket.gethostname()} ({platform.system()})",
-        }
+        payload = _hardware_payload(stream_id)
         res = requests.post(f"{api_url.rstrip('/')}/api/runner/register", json=payload, timeout=3.0)
         if res.status_code in (200, 201):
-            print(f"[*] Registered hardware with {api_url}: {device_name}")
-        else:
-            print(f"[!] Warning: hardware registration got HTTP {res.status_code} "
-                  f"(server may not have the /api/runner/register route deployed yet)")
+            print(f"[*] Registered hardware with {api_url}: {payload['device_name']}")
+            return True
+        print(f"[!] Warning: hardware registration got HTTP {res.status_code} "
+              f"(server may not have the /api/runner/register route deployed yet)")
+        return False
     except Exception as e:
         print(f"[!] Warning: hardware registration failed: {e}")
+        return False
+
+
+def register_hardware_loop(api_url: Optional[str], stream_id: str, interval_seconds: float = 60.0):
+    """Re-registers on a fixed interval for the life of the process, run in
+    a background thread. The relay's registration is in-memory with a TTL
+    (server.py: EDGE_HARDWARE_TTL_SECONDS) — a relay restart or redeploy
+    (the Host 2 auto-deploy watcher bounces Uvicorn on every push to main)
+    silently wipes it, and a once-at-startup registration then never comes
+    back until someone notices the dashboard says 'no edge GPU runner' and
+    manually restarts this process. Re-registering periodically means the
+    next relay restart just gets picked back up within one interval,
+    automatically. Found live 2026-09-21 after exactly that happened twice
+    in a row following auto-deploy restarts."""
+    while True:
+        register_hardware_once(api_url, stream_id)
+        time.sleep(interval_seconds)
 
 
 def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name: str = "yolo11x.pt", api_url: Optional[str] = "http://localhost:8000"):
-    register_hardware(api_url, stream_id)
+    threading.Thread(
+        target=register_hardware_loop, args=(api_url, stream_id), daemon=True
+    ).start()
 
     print(f"[*] Loading model {model_name} onto CUDA...")
     model = YOLO(model_name)
