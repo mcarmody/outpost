@@ -186,7 +186,7 @@
     const seenSpecies = new Set();
 
     // Determine host origin for SSE connection
-    const API_BASE = window.location.origin.includes('8000') ? '' : 'http://localhost:8000';
+    const API_BASE = '';
     const evtSource = new EventSource(`${API_BASE}/events`);
 
     evtSource.addEventListener('connected', (e) => {
