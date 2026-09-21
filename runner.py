@@ -115,8 +115,12 @@ def register_hardware(api_url: Optional[str], stream_id: str):
             "total_vram_gb": total_vram_gb,
             "hostname": f"{socket.gethostname()} ({platform.system()})",
         }
-        requests.post(f"{api_url.rstrip('/')}/api/runner/register", json=payload, timeout=3.0)
-        print(f"[*] Registered hardware with {api_url}: {device_name}")
+        res = requests.post(f"{api_url.rstrip('/')}/api/runner/register", json=payload, timeout=3.0)
+        if res.status_code in (200, 201):
+            print(f"[*] Registered hardware with {api_url}: {device_name}")
+        else:
+            print(f"[!] Warning: hardware registration got HTTP {res.status_code} "
+                  f"(server may not have the /api/runner/register route deployed yet)")
     except Exception as e:
         print(f"[!] Warning: hardware registration failed: {e}")
 
