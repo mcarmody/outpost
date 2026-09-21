@@ -39,12 +39,27 @@
 
     <!-- Connection Status Pill -->
     <div class="flex items-center space-x-3">
+      <button id="audio-toggle-btn" onclick="toggleWildlifeAudio()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-emerald-400 flex items-center transition" title="Toggle audio alert chime">
+        <i class="fa-solid fa-bell"></i>
+        <span class="ml-1 hidden sm:inline">Alerts: ON</span>
+      </button>
       <div class="flex items-center space-x-2 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs">
         <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="status-indicator"></span>
         <span class="font-mono text-slate-300" id="status-text">Connecting...</span>
       </div>
     </div>
   </header>
+
+  <!-- Slide-Down High-Priority Alert Banner -->
+  <div id="alert-banner" class="hidden bg-rose-950/90 border-b border-rose-500/60 px-4 py-2 flex items-center justify-between z-20 backdrop-blur shadow-lg">
+    <div class="flex items-center space-x-2 text-rose-200 text-xs font-semibold">
+      <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+      <span id="alert-banner-text">TARGET ALERT: High-priority species detected</span>
+    </div>
+    <button onclick="dismissAlertBanner()" class="text-rose-400 hover:text-white text-xs p-1">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
 
   <!-- Main Viewport -->
   <main class="flex-1 flex overflow-hidden">
@@ -223,6 +238,12 @@
         }
       }
 
+      // Trigger high-visibility alert banner and audio chime if alert rule matched
+      if (evt.metadata && evt.metadata.alert_triggered) {
+        showAlertBanner(`🚨 TARGET SPECIES ALERT: ${evt.species} sighted on ${evt.stream_id} (${Math.round(evt.confidence * 100)}% confidence)!`);
+        playWildlifeChime();
+      }
+
       // Check target filter
       const filter = targetSelect.value;
       const isTarget = (filter !== 'ALL' && filter === evt.species);
@@ -253,6 +274,54 @@
       if (eventFeed.children.length > 40) {
         eventFeed.removeChild(eventFeed.lastChild);
       }
+    }
+
+    // Audio Alert Chime & Controls
+    let audioAlertEnabled = true;
+    let audioCtx = null;
+
+    function toggleWildlifeAudio() {
+      audioAlertEnabled = !audioAlertEnabled;
+      const btn = document.getElementById('audio-toggle-btn');
+      if (audioAlertEnabled) {
+        btn.innerHTML = '<i class="fa-solid fa-bell"></i><span class="ml-1 hidden sm:inline">Alerts: ON</span>';
+        btn.className = 'px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-emerald-400 flex items-center transition';
+      } else {
+        btn.innerHTML = '<i class="fa-solid fa-bell-slash"></i><span class="ml-1 hidden sm:inline">Alerts: OFF</span>';
+        btn.className = 'px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-500 flex items-center transition';
+      }
+    }
+
+    function playWildlifeChime() {
+      if (!audioAlertEnabled) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440.0, audioCtx.currentTime); // A4
+        osc.frequency.exponentialRampToValueAtTime(880.0, audioCtx.currentTime + 0.18); // A5
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.7);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.75);
+      } catch(e) {}
+    }
+
+    function showAlertBanner(text) {
+      const banner = document.getElementById('alert-banner');
+      const textEl = document.getElementById('alert-banner-text');
+      if (banner && textEl) {
+        textEl.textContent = text;
+        banner.classList.remove('hidden');
+      }
+    }
+
+    function dismissAlertBanner() {
+      const banner = document.getElementById('alert-banner');
+      if (banner) banner.classList.add('hidden');
     }
   </script>
 </body>
