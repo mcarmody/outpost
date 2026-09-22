@@ -294,6 +294,11 @@ def test_stream_watchdog_and_failover():
     assert len(data) >= 3
     streams = {s["stream_id"]: s for s in data}
     assert "anacapa_kelp_01" in streams
+    assert "embed_url" in streams["anacapa_kelp_01"]
+    assert "OAJF1Ie1m_Q" in streams["anacapa_kelp_01"]["embed_url"]
+
+    # Test katmai alias registration in watchdog
+    assert "katmai_brooks_falls" in streams
 
     # Register a synthetic/mock stream that triggers failover
     stream_watchdog.register_stream("test_mock_stream", "mock://offline_url", "Test Provider")
@@ -305,6 +310,36 @@ def test_stream_watchdog_and_failover():
     assert api_res.status_code == 200
     api_data = api_res.json()
     assert api_data["mode"] == "fallback_synthetic"
+
+
+def test_stream_embed_endpoint():
+    client = TestClient(app)
+
+    # Anacapa embed endpoint
+    resp = client.get("/api/streams/anacapa_kelp_01/embed")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stream_id"] == "anacapa_kelp_01"
+    assert "embed_url" in data
+    assert "youtube-nocookie.com/embed/OAJF1Ie1m_Q" in data["embed_url"]
+
+    # Katmai alias embed endpoint
+    resp_alias = client.get("/api/streams/katmai_brooks_falls/embed")
+    assert resp_alias.status_code == 200
+    data_alias = resp_alias.json()
+    assert data_alias["stream_id"] == "katmai_brooks_falls"
+    assert "J7ZrIDvqlic" in data_alias["embed_url"]
+
+    # Unknown stream returns 404
+    resp_err = client.get("/api/streams/unknown_stream_99/embed")
+    assert resp_err.status_code == 404
+
+    # Full /api/streams endpoint exposes embed_url
+    streams_resp = client.get("/api/streams")
+    assert streams_resp.status_code == 200
+    for s in streams_resp.json():
+        assert "embed_url" in s
+        assert "watch_url" in s
 
 
 def test_prometheus_metrics():

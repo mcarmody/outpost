@@ -76,15 +76,19 @@
               <span class="font-medium text-slate-200">Anacapa Island Kelp Forest</span>
               <span class="text-slate-500">· Explore.org</span>
             </div>
-            <span class="text-slate-400 font-mono text-[11px]" id="anacapa_kelp_01-last-seen">No detections yet</span>
+            <div class="flex items-center space-x-2">
+              <span class="text-slate-400 font-mono text-[11px]" id="anacapa_kelp_01-last-seen">No detections yet</span>
+              <button id="anacapa_kelp_01-mode-btn" onclick="toggleStreamMode('anacapa_kelp_01')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+            </div>
           </div>
           <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
-            <img id="anacapa_kelp_01-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
-            <div id="anacapa_kelp_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+            <iframe id="anacapa_kelp_01-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            <img id="anacapa_kelp_01-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
+            <div id="anacapa_kelp_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
               <i class="fa-solid fa-water text-3xl"></i>
               <span class="text-xs">Awaiting live CUDA inference stream</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-cyan-300 hidden" id="anacapa_kelp_01-tag">
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-cyan-300 hidden z-10" id="anacapa_kelp_01-tag">
               <span id="anacapa_kelp_01-label"></span>
             </div>
           </div>
@@ -98,15 +102,19 @@
               <span class="font-medium text-slate-200">Cornell Lab FeederWatch</span>
               <span class="text-slate-500">· Cornell Lab</span>
             </div>
-            <span class="text-slate-400 font-mono text-[11px]" id="cornell_feeder_01-last-seen">No detections yet</span>
+            <div class="flex items-center space-x-2">
+              <span class="text-slate-400 font-mono text-[11px]" id="cornell_feeder_01-last-seen">No detections yet</span>
+              <button id="cornell_feeder_01-mode-btn" onclick="toggleStreamMode('cornell_feeder_01')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+            </div>
           </div>
           <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
-            <img id="cornell_feeder_01-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
-            <div id="cornell_feeder_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+            <iframe id="cornell_feeder_01-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            <img id="cornell_feeder_01-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
+            <div id="cornell_feeder_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
               <i class="fa-solid fa-dove text-3xl"></i>
               <span class="text-xs">Awaiting live CUDA inference stream</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-amber-300 hidden" id="cornell_feeder_01-tag">
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-amber-300 hidden z-10" id="cornell_feeder_01-tag">
               <span id="cornell_feeder_01-label"></span>
             </div>
           </div>
@@ -120,15 +128,19 @@
               <span class="font-medium text-slate-200">Katmai Brooks Falls (Bears)</span>
               <span class="text-slate-500">· Explore.org</span>
             </div>
-            <span class="text-slate-400 font-mono text-[11px]" id="katmai_brooks_falls-last-seen">No detections yet</span>
+            <div class="flex items-center space-x-2">
+              <span class="text-slate-400 font-mono text-[11px]" id="katmai_brooks_falls-last-seen">No detections yet</span>
+              <button id="katmai_brooks_falls-mode-btn" onclick="toggleStreamMode('katmai_brooks_falls')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+            </div>
           </div>
           <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
-            <img id="katmai_brooks_falls-preview" src="" class="w-full h-full object-cover hidden" alt="Latest Frame">
-            <div id="katmai_brooks_falls-placeholder" class="text-slate-600 flex flex-col items-center space-y-2">
+            <iframe id="katmai_brooks_falls-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            <img id="katmai_brooks_falls-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
+            <div id="katmai_brooks_falls-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
               <i class="fa-solid fa-mountain text-3xl"></i>
               <span class="text-xs">Awaiting live CUDA inference stream</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-emerald-300 hidden" id="katmai_brooks_falls-tag">
+            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-emerald-300 hidden z-10" id="katmai_brooks_falls-tag">
               <span id="katmai_brooks_falls-label"></span>
             </div>
           </div>
@@ -185,9 +197,82 @@
     let totalDetections = 0;
     const seenSpecies = new Set();
 
+    // Stream live embed player state
+    const streamEmbedUrls = {
+      'anacapa_kelp_01': 'https://www.youtube-nocookie.com/embed/OAJF1Ie1m_Q?autoplay=1&mute=1',
+      'cornell_feeder_01': 'https://www.youtube-nocookie.com/embed/x10vL6_47Dw?autoplay=1&mute=1',
+      'katmai_brooks_falls': 'https://www.youtube-nocookie.com/embed/J7ZrIDvqlic?autoplay=1&mute=1',
+      'katmai_brooks_01': 'https://www.youtube-nocookie.com/embed/J7ZrIDvqlic?autoplay=1&mute=1',
+    };
+
+    const streamMode = {
+      'anacapa_kelp_01': 'preview',
+      'cornell_feeder_01': 'preview',
+      'katmai_brooks_falls': 'preview',
+      'katmai_brooks_01': 'preview',
+    };
+
+    function toggleStreamMode(streamId) {
+      const current = streamMode[streamId] || 'preview';
+      const player = document.getElementById(`${streamId}-player`);
+      const preview = document.getElementById(`${streamId}-preview`);
+      const placeholder = document.getElementById(`${streamId}-placeholder`);
+      const btn = document.getElementById(`${streamId}-mode-btn`);
+
+      if (current === 'preview') {
+        streamMode[streamId] = 'live';
+        if (player) {
+          if (!player.src || player.src === 'about:blank' || player.src === window.location.href) {
+            player.src = streamEmbedUrls[streamId] || '';
+          }
+          player.classList.remove('hidden');
+        }
+        if (preview) preview.classList.add('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
+        if (btn) {
+          btn.innerHTML = '<i class="fa-solid fa-camera text-[9px]"></i><span>CV Feed</span>';
+          btn.className = 'px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] flex items-center space-x-1 border border-indigo-500 transition shadow-sm';
+        }
+      } else {
+        streamMode[streamId] = 'preview';
+        if (player) {
+          player.classList.add('hidden');
+        }
+        if (preview && preview.src && !preview.src.endsWith('index.html')) {
+          preview.classList.remove('hidden');
+        } else if (placeholder) {
+          placeholder.classList.remove('hidden');
+        }
+        if (btn) {
+          btn.innerHTML = '<i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span>';
+          btn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition';
+        }
+      }
+    }
+
     // Determine host origin for SSE connection
     const API_BASE = '';
     const evtSource = new EventSource(`${API_BASE}/events`);
+
+    async function loadStreamEmbeds() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/streams`);
+        if (resp.ok) {
+          const streams = await resp.json();
+          streams.forEach(s => {
+            if (s.embed_url) {
+              streamEmbedUrls[s.stream_id] = s.embed_url;
+              if (s.stream_id === 'katmai_brooks_01') {
+                streamEmbedUrls['katmai_brooks_falls'] = s.embed_url;
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load dynamic stream embeds:', err);
+      }
+    }
+    loadStreamEmbeds();
 
     evtSource.addEventListener('connected', (e) => {
       statusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500';
@@ -235,11 +320,13 @@
           if (preview && placeholder) {
             preview.onerror = () => {
               preview.classList.add('hidden');
-              placeholder.classList.remove('hidden');
+              if (streamMode[evt.stream_id] !== 'live') placeholder.classList.remove('hidden');
             };
             preview.src = `${API_BASE}${evt.snapshot_url}`;
-            preview.classList.remove('hidden');
-            placeholder.classList.add('hidden');
+            if (streamMode[evt.stream_id] !== 'live') {
+              preview.classList.remove('hidden');
+              placeholder.classList.add('hidden');
+            }
           }
         }
       }

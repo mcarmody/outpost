@@ -5,6 +5,7 @@ automatic failover to synthetic frame generation (simulate.py) if an upstream
 feed drops, rotates stream IDs, or hits YouTube bot-checks.
 """
 
+import re
 import time
 from typing import Any, Dict, List, Optional
 try:
@@ -15,6 +16,21 @@ except ImportError:
     HAS_STREAMLINK = False
 
 
+def extract_youtube_id(url: str) -> Optional[str]:
+    """Extracts 11-char YouTube video ID from various URL formats."""
+    if not url:
+        return None
+    patterns = [
+        r"(?:v=|\/v\/|youtu\.be\/|\/embed\/)([A-Za-z0-9_-]{11})",
+        r"^[A-Za-z0-9_-]{11}$",
+    ]
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1) if "(" in p else m.group(0)
+    return None
+
+
 class StreamWatchdog:
     def __init__(self, token_ttl_seconds: float = 1800.0):
         self.token_ttl = token_ttl_seconds
@@ -23,10 +39,16 @@ class StreamWatchdog:
 
     def register_stream(self, stream_id: str, source_url: str, provider: str = "Explore.org"):
         """Registers a stream target for health monitoring."""
+        yt_id = extract_youtube_id(source_url)
+        embed_url = f"https://www.youtube-nocookie.com/embed/{yt_id}?autoplay=1&mute=1" if yt_id else None
+        watch_url = f"https://www.youtube.com/watch?v={yt_id}" if yt_id else source_url
         self.registry[stream_id] = {
             "stream_id": stream_id,
             "source_url": source_url,
             "provider": provider,
+            "youtube_id": yt_id,
+            "embed_url": embed_url,
+            "watch_url": watch_url,
             "resolved_hls": None,
             "resolved_at": 0.0,
             "status": "unresolved",
@@ -52,6 +74,7 @@ class StreamWatchdog:
             return {
                 "stream_id": stream_id,
                 "url": entry["resolved_hls"],
+                "embed_url": entry.get("embed_url"),
                 "mode": "live",
                 "cached": True,
             }
@@ -64,6 +87,7 @@ class StreamWatchdog:
             return {
                 "stream_id": stream_id,
                 "url": None,
+                "embed_url": entry.get("embed_url"),
                 "mode": "fallback_synthetic",
                 "cached": False,
                 "fallback_reason": "streamlink package not installed; running in synthetic fallback mode",
@@ -97,6 +121,8 @@ class StreamWatchdog:
             return {
                 "stream_id": stream_id,
                 "url": direct_hls,
+                "embed_url": entry.get("embed_url"),
+                "watch_url": entry.get("watch_url"),
                 "mode": "live",
                 "cached": False,
             }
@@ -111,6 +137,8 @@ class StreamWatchdog:
             return {
                 "stream_id": stream_id,
                 "url": None,
+                "embed_url": entry.get("embed_url"),
+                "watch_url": entry.get("watch_url"),
                 "mode": "fallback_synthetic",
                 "cached": False,
                 "fallback_reason": str(e),
@@ -141,6 +169,8 @@ class StreamWatchdog:
                 "provider": entry["provider"],
                 "status": entry["status"],
                 "mode": entry["mode"],
+                "embed_url": entry.get("embed_url"),
+                "watch_url": entry.get("watch_url"),
                 "consecutive_failures": entry["consecutive_failures"],
                 "token_age_sec": round(time.time() - entry["resolved_at"], 1) if entry["resolved_at"] else None,
                 "last_error": entry["last_error"],

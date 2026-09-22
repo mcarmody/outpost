@@ -127,9 +127,30 @@ class AlertRule(BaseModel):
 
 # In-memory stream registry
 KNOWN_STREAMS = {
-    "anacapa_kelp_01": {"name": "Anacapa Island Kelp Forest", "provider": "Explore.org", "fps_target": 120},
-    "cornell_feeder_01": {"name": "Cornell Lab FeederWatch", "provider": "Cornell Lab", "fps_target": 60},
-    "katmai_brooks_01": {"name": "Katmai Brooks Falls", "provider": "Explore.org", "fps_target": 60},
+    "anacapa_kelp_01": {
+        "name": "Anacapa Island Kelp Forest",
+        "provider": "Explore.org",
+        "fps_target": 120,
+        "youtube_id": "OAJF1Ie1m_Q",
+        "embed_url": "https://www.youtube-nocookie.com/embed/OAJF1Ie1m_Q?autoplay=1&mute=1",
+        "watch_url": "https://www.youtube.com/watch?v=OAJF1Ie1m_Q",
+    },
+    "cornell_feeder_01": {
+        "name": "Cornell Lab FeederWatch",
+        "provider": "Cornell Lab",
+        "fps_target": 60,
+        "youtube_id": "x10vL6_47Dw",
+        "embed_url": "https://www.youtube-nocookie.com/embed/x10vL6_47Dw?autoplay=1&mute=1",
+        "watch_url": "https://www.youtube.com/watch?v=x10vL6_47Dw",
+    },
+    "katmai_brooks_01": {
+        "name": "Katmai Brooks Falls",
+        "provider": "Explore.org",
+        "fps_target": 60,
+        "youtube_id": "J7ZrIDvqlic",
+        "embed_url": "https://www.youtube-nocookie.com/embed/J7ZrIDvqlic?autoplay=1&mute=1",
+        "watch_url": "https://www.youtube.com/watch?v=J7ZrIDvqlic",
+    },
 }
 
 stream_telemetry: Dict[str, Dict[str, Any]] = {}
@@ -249,6 +270,7 @@ stream_watchdog = StreamWatchdog()
 stream_watchdog.register_stream("anacapa_kelp_01", "https://www.youtube.com/watch?v=OAJF1Ie1m_Q", "Explore.org")
 stream_watchdog.register_stream("cornell_feeder_01", "https://www.youtube.com/watch?v=x10vL6_47Dw", "Cornell Lab")
 stream_watchdog.register_stream("katmai_brooks_01", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
+stream_watchdog.register_stream("katmai_brooks_falls", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
 
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
@@ -404,6 +426,26 @@ async def resolve_stream(stream_id: str, quality: str = "720p", force: bool = Fa
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/api/streams/{stream_id}/embed")
+async def get_stream_embed(stream_id: str):
+    """Retrieve verified video embed player parameters and fallback links."""
+    stream = stream_telemetry.get(stream_id)
+    if not stream and stream_id == "katmai_brooks_falls":
+        stream = stream_telemetry.get("katmai_brooks_01")
+
+    if not stream:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found in telemetry registry.")
+
+    return {
+        "stream_id": stream_id,
+        "name": stream.get("name"),
+        "provider": stream.get("provider"),
+        "youtube_id": stream.get("youtube_id"),
+        "embed_url": stream.get("embed_url"),
+        "watch_url": stream.get("watch_url"),
+    }
+
+
 
 @app.get("/api/stats/species")
 async def get_species_stats():
@@ -458,6 +500,9 @@ def process_event(event: DetectionEvent) -> dict:
             "name": event.stream_id,
             "provider": "Custom",
             "fps_target": 60,
+            "youtube_id": None,
+            "embed_url": None,
+            "watch_url": None,
             "status": "active",
             "total_detections": 0,
             "last_detection": None,
