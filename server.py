@@ -484,8 +484,10 @@ async def get_recent_events(
     species: Optional[str] = None,
 ):
     """Retrieve recent detection events from persistent SQLite with optional stream and species filtering."""
+    # Enforce ring buffer depth ceiling (maxlen: 200) for recent snapshot queries
+    capped_limit = min(max(1, limit), 200)
     canonical_stream = resolve_stream_id(stream_id) if stream_id else None
-    events_data = db.query_events(limit=limit, stream_id=canonical_stream, species=species, order="asc")
+    events_data = db.query_events(limit=capped_limit, stream_id=canonical_stream, species=species, order="asc")
     if events_data:
         return [DetectionEvent(**e) for e in events_data]
 
@@ -496,7 +498,7 @@ async def get_recent_events(
     if species:
         sp_norm = species.strip().lower().replace("_", " ")
         events = [e for e in events if e.species.strip().lower().replace("_", " ") == sp_norm]
-    return events[-limit:]
+    return events[-capped_limit:]
 
 
 @app.get("/api/events/{event_id}", response_model=DetectionEvent)

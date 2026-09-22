@@ -2,8 +2,13 @@
 
 import asyncio
 import json
+import os
 import time
 import pytest
+
+# Ensure isolated SQLite database per test process to prevent cross-run interference
+os.environ["OUTPOST_DB_PATH"] = f"/tmp/outpost_test_{os.getpid()}.db"
+
 from fastapi.testclient import TestClient
 import db
 from server import (
