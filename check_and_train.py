@@ -85,25 +85,20 @@ def should_attempt(current: int, state: dict, force: bool = False) -> "tuple[boo
     return True, "threshold cleared"
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api-url", type=str, default="https://outpost.brock.ventures")
-    parser.add_argument("--force", action="store_true", help="Skip the threshold checks and run train_finetune.py --auto-deploy unconditionally")
-    args = parser.parse_args()
-
+def run_once(api_url: str, force: bool = False) -> None:
     state = load_state()
-    current = current_review_count(args.api_url)
+    current = current_review_count(api_url)
     print(f"[*] Current reviewed (accept+relabel) example count: {current}")
     print(f"[*] State: {state}")
 
-    attempt, reason = should_attempt(current, state, force=args.force)
+    attempt, reason = should_attempt(current, state, force=force)
     if not attempt:
         print(f"[*] {reason}. Nothing to do.")
         return
 
     print(f"[*] {reason} -- running train_finetune.py --auto-deploy")
     train_script = BASE_DIR / "train_finetune.py"
-    result = subprocess.run([sys.executable, str(train_script), "--api-url", args.api_url, "--auto-deploy"])
+    result = subprocess.run([sys.executable, str(train_script), "--api-url", api_url, "--auto-deploy"])
 
     state["last_attempted_count"] = current
     state["last_run_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -115,6 +110,36 @@ def main():
     else:
         print(f"[!] train_finetune.py exited {result.returncode} (unexpected -- check its output above).")
     save_state(state)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--api-url", type=str, default="https://outpost.brock.ventures")
+    parser.add_argument("--force", action="store_true", help="Skip the threshold checks and run train_finetune.py --auto-deploy unconditionally")
+    parser.add_argument("--loop", action="store_true",
+                         help="Run forever, checking every --interval-hours, instead of a single check-and-exit. "
+                              "Windows Task Scheduler could not be made to fire reliably in this environment "
+                              "(confirmed live 2026-09-22 -- even a trivial echo task failed with the same "
+                              "opaque 'Last Result: 1' every time), so this is the actual unattended mechanism: "
+                              "launch once as a long-lived background process, same as runner.py.")
+    parser.add_argument("--interval-hours", type=float, default=24.0)
+    args = parser.parse_args()
+
+    if not args.loop:
+        run_once(args.api_url, force=args.force)
+        return
+
+    print(f"[*] Looping forever, checking every {args.interval_hours}h.")
+    while True:
+        try:
+            run_once(args.api_url, force=args.force)
+        except Exception as exc:
+            # A transient network hiccup or a one-off training failure
+            # shouldn't kill the whole daemon -- log it and try again next
+            # interval rather than needing someone to notice this process
+            # died and manually relaunch it.
+            print(f"[!] run_once() raised: {exc}")
+        time.sleep(args.interval_hours * 3600.0)
 
 
 if __name__ == "__main__":
