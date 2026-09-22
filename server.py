@@ -1251,10 +1251,31 @@ async def get_review_telemetry():
 @app.get("/api/review/export")
 async def export_review_dataset(
     format: str = "json",
-    decision: str = "accept",
+    decision: str = "accept,relabel",
 ):
-    """Export verified human review dataset for model fine-tuning."""
-    reviews = db.query_reviews(limit=1000, decision=decision)
+    """Export verified human review dataset for model fine-tuning.
+
+    `decision` takes a comma-separated list (default "accept,relabel") --
+    both carry a usable ground-truth label via confirmed_species. A plain
+    "reject" means the detection itself was wrong and has no confirmed
+    species, so it's excluded by default; pass decision=reject explicitly
+    if a future consumer wants hard negatives.
+
+    Previously hardcoded to decision="accept" alone, which silently
+    dropped every relabel correction (e.g. "person" -> "lobster") out of
+    the export -- exactly the corrections the human-reinforcement loop
+    exists to capture. Found live 2026-09-22 when Mike asked whether his
+    lobster relabel would actually reach a training run.
+    """
+    decisions = [d.strip().lower() for d in decision.split(",") if d.strip()]
+    reviews: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for d in decisions:
+        for r in db.query_reviews(limit=1000, decision=d):
+            if r.get("review_id") not in seen_ids:
+                seen_ids.add(r.get("review_id"))
+                reviews.append(r)
+
     if format.lower() == "yolo_manifest":
         manifest = []
         for r in reviews:
