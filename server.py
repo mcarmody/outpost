@@ -298,6 +298,10 @@ stream_watchdog.register_stream("cornell_feeder_01", "https://www.youtube.com/wa
 stream_watchdog.register_stream("katmai_brooks_01", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
 stream_watchdog.register_stream("katmai_brooks_falls", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
 
+from session_tracker import SightingSessionTracker
+
+session_tracker = SightingSessionTracker(gap_threshold_seconds=60.0)
+
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
 subscribers: Set[asyncio.Queue] = set()
@@ -339,6 +343,12 @@ def hydrate_from_db():
             species_stats[sp]["last_seen"] = evt.timestamp
             if evt.stream_id not in species_stats[sp]["streams"]:
                 species_stats[sp]["streams"].append(evt.stream_id)
+
+        # Hydrate historical completed sessions into session tracker
+        past_sessions = db.query_sessions(limit=50)
+        for s in reversed(past_sessions):
+            if s.get("status") == "completed":
+                session_tracker.completed_sessions.append(s)
 
         total_events_dispatched = len(recent_events)
     except Exception as e:
@@ -404,6 +414,7 @@ async def health_check():
         "ring_buffer_depth": len(recent_events),
         "total_events_dispatched": total_events_dispatched,
         "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
+        "active_wildlife_sessions": len(session_tracker.get_active_sessions()),
         "snapshot_storage_mb": snap_stats["total_mb"],
         "snapshot_files_count": snap_stats["total_files"],
         "database": db_stats,
@@ -581,6 +592,87 @@ async def get_activity_analytics(
     return db.get_hourly_activity(hours=hours, stream_id=canonical_stream)
 
 
+@app.get("/api/sessions/active")
+async def get_active_sessions():
+    """Retrieve all wildlife sighting encounters actively underway across cameras."""
+    active = session_tracker.get_active_sessions()
+    return {
+        "active_sessions": active,
+        "count": len(active),
+        "timestamp": time.time(),
+    }
+
+
+@app.get("/api/sessions/recent")
+async def get_recent_sessions(
+    limit: int = Query(default=50, ge=1, le=200, description="Max sessions to return"),
+    stream_id: Optional[str] = Query(default=None, description="Stream ID filter"),
+    species: Optional[str] = Query(default=None, description="Species filter"),
+    status: Optional[str] = Query(default=None, description="Status filter ('active' or 'completed')"),
+):
+    """Retrieve historical and active wildlife sighting sessions with dwell time and detection counts."""
+    canonical_stream = resolve_stream_id(stream_id) if stream_id else None
+    mem_sessions = session_tracker.get_recent_sessions(
+        limit=limit,
+        stream_id=canonical_stream,
+        species=species,
+        status=status,
+    )
+    if len(mem_sessions) >= limit:
+        return {
+            "sessions": mem_sessions,
+            "total": len(mem_sessions),
+            "source": "memory",
+            "timestamp": time.time(),
+        }
+
+    # Supplement or fallback to SQLite
+    db_sessions = db.query_sessions(
+        limit=limit,
+        stream_id=canonical_stream,
+        species=species,
+        status=status,
+    )
+    merged_map = {s["session_id"]: s for s in mem_sessions}
+    for s in db_sessions:
+        if s["session_id"] not in merged_map:
+            merged_map[s["session_id"]] = s
+
+    result = sorted(merged_map.values(), key=lambda x: x.get("start_time", ""), reverse=True)[:limit]
+    return {
+        "sessions": result,
+        "total": len(result),
+        "source": "hybrid",
+        "timestamp": time.time(),
+    }
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_by_id(session_id: str):
+    """Retrieve a specific wildlife encounter session and its dwell metrics."""
+    for s in session_tracker.get_active_sessions():
+        if s["session_id"] == session_id:
+            return s
+    for s in session_tracker.completed_sessions:
+        if s["session_id"] == session_id:
+            return s
+
+    sess = db.get_session_by_id(session_id)
+    if sess:
+        return sess
+
+    raise HTTPException(status_code=404, detail=f"Sighting session '{session_id}' not found.")
+
+
+@app.get("/api/analytics/sessions")
+async def get_sessions_analytics():
+    """Retrieve encounter dwell time metrics, species engagement, and visit statistics."""
+    analytics = session_tracker.get_session_analytics()
+    analytics["timestamp"] = time.time()
+    return analytics
+
+
+
 
 @app.get("/api/streams")
 async def get_streams():
@@ -749,6 +841,16 @@ def process_event(event: DetectionEvent) -> dict:
                 )
                 event.metadata["webhook_dispatch"] = dispatch_res
                 break
+
+    # Sighting session clustering & dwell tracking
+    active_sess, completed_sess = session_tracker.process_event(event.model_dump())
+    db.save_session(active_sess)
+    if completed_sess:
+        db.save_session(completed_sess)
+
+    event.metadata["session_id"] = active_sess["session_id"]
+    event.metadata["session_duration_sec"] = active_sess["duration_seconds"]
+    event.metadata["session_detection_count"] = active_sess["detection_count"]
 
     # Persist detection event to SQLite database
     db.save_event(event)

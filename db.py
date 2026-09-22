@@ -78,6 +78,40 @@ def init_db(db_path: Optional[Union[Path, str]] = None) -> None:
                 ON detection_events (timestamp DESC);
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sighting_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    stream_id TEXT NOT NULL,
+                    species TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    duration_seconds REAL NOT NULL DEFAULT 0.0,
+                    detection_count INTEGER NOT NULL DEFAULT 1,
+                    peak_confidence REAL NOT NULL,
+                    best_snapshot_url TEXT,
+                    status TEXT NOT NULL DEFAULT 'active'
+                );
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sessions_stream_start
+                ON sighting_sessions (stream_id, start_time DESC);
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sessions_species_start
+                ON sighting_sessions (species, start_time DESC);
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sessions_status
+                ON sighting_sessions (status);
+                """
+            )
     finally:
         conn.close()
 
@@ -445,3 +479,108 @@ def clear_events(db_path: Optional[Union[Path, str]] = None) -> int:
         return deleted
     finally:
         conn.close()
+
+
+def save_session(session: Dict[str, Any], db_path: Optional[Union[Path, str]] = None) -> bool:
+    """Insert or update a wildlife sighting session in SQLite."""
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO sighting_sessions (
+                    session_id, stream_id, species, start_time, end_time,
+                    duration_seconds, detection_count, peak_confidence,
+                    best_snapshot_url, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    session["session_id"],
+                    session["stream_id"],
+                    session["species"],
+                    session["start_time"],
+                    session["end_time"],
+                    float(session.get("duration_seconds", 0.0)),
+                    int(session.get("detection_count", 1)),
+                    float(session.get("peak_confidence", 0.0)),
+                    session.get("best_snapshot_url"),
+                    session.get("status", "active"),
+                ),
+            )
+        return True
+    finally:
+        conn.close()
+
+
+def get_session_by_id(session_id: str, db_path: Optional[Union[Path, str]] = None) -> Optional[Dict[str, Any]]:
+    """Fetch a single sighting session by its ID."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            SELECT session_id, stream_id, species, start_time, end_time,
+                   duration_seconds, detection_count, peak_confidence,
+                   best_snapshot_url, status
+            FROM sighting_sessions
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def query_sessions(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    species: Optional[str] = None,
+    status: Optional[str] = None,
+    db_path: Optional[Union[Path, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Query recent sighting sessions with optional stream, species, and status filters."""
+    conn = get_db_connection(db_path)
+    try:
+        clauses = []
+        params = []
+        if stream_id:
+            clauses.append("stream_id = ?")
+            params.append(stream_id)
+        if species:
+            clauses.append("species = ?")
+            params.append(species)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT session_id, stream_id, species, start_time, end_time,
+                   duration_seconds, detection_count, peak_confidence,
+                   best_snapshot_url, status
+            FROM sighting_sessions
+            {where_sql}
+            ORDER BY start_time DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        cursor = conn.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def clear_sessions(db_path: Optional[Union[Path, str]] = None) -> int:
+    """Clear all records from sighting_sessions table (used for test isolation)."""
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.execute("DELETE FROM sighting_sessions")
+            deleted = cursor.rowcount
+        return deleted
+    finally:
+        conn.close()
+

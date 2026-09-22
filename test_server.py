@@ -951,6 +951,191 @@ def test_index_html_activity_pulse_and_export_invariants():
     assert "/api/events/export?format=csv" in html
 
 
+def test_session_tracker_clustering_and_dwell():
+    """Verify SightingSessionTracker clusters sequential detections and tracks dwell time."""
+    from session_tracker import SightingSessionTracker
+    tracker = SightingSessionTracker(gap_threshold_seconds=10.0)
+
+    t0 = 1000.0
+    # First detection creates session
+    s1, comp = tracker.process_event({
+        "stream_id": "feeder_cam",
+        "species": "blue_jay",
+        "confidence": 0.85,
+        "snapshot_url": "/snap1.jpg",
+    }, now_ts=t0)
+    assert comp is None
+    assert s1["detection_count"] == 1
+    assert s1["duration_seconds"] == 0.0
+    assert s1["peak_confidence"] == 0.85
+    assert s1["status"] == "active"
+
+    # Second detection 3s later extends session
+    s2, comp = tracker.process_event({
+        "stream_id": "feeder_cam",
+        "species": "blue_jay",
+        "confidence": 0.95,
+        "snapshot_url": "/snap2.jpg",
+    }, now_ts=t0 + 3.0)
+    assert comp is None
+    assert s2["session_id"] == s1["session_id"]
+    assert s2["detection_count"] == 2
+    assert s2["duration_seconds"] == 3.0
+    assert s2["peak_confidence"] == 0.95
+    assert s2["best_snapshot_url"] == "/snap2.jpg"
+
+    # Detection beyond gap threshold (15s later) completes previous session and creates new one
+    s3, comp = tracker.process_event({
+        "stream_id": "feeder_cam",
+        "species": "blue_jay",
+        "confidence": 0.80,
+        "snapshot_url": "/snap3.jpg",
+    }, now_ts=t0 + 18.0)
+    assert comp is not None
+    assert comp["session_id"] == s1["session_id"]
+    assert comp["status"] == "completed"
+    assert comp["duration_seconds"] == 3.0
+    assert s3["session_id"] != s1["session_id"]
+    assert s3["detection_count"] == 1
+
+
+def test_db_session_persistence_and_query(tmp_path):
+    """Verify SQLite persistence and query filters for sighting sessions."""
+    db_file = tmp_path / "test_sessions.db"
+    db.init_db(db_file)
+
+    sess1 = {
+        "session_id": "sess_001",
+        "stream_id": "anacapa_kelp_01",
+        "species": "garibaldi",
+        "start_time": "2026-09-22T04:00:00Z",
+        "end_time": "2026-09-22T04:02:30Z",
+        "duration_seconds": 150.0,
+        "detection_count": 25,
+        "peak_confidence": 0.96,
+        "best_snapshot_url": "/snap_g1.jpg",
+        "status": "completed",
+    }
+    sess2 = {
+        "session_id": "sess_002",
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "start_time": "2026-09-22T04:10:00Z",
+        "end_time": "2026-09-22T04:11:00Z",
+        "duration_seconds": 60.0,
+        "detection_count": 12,
+        "peak_confidence": 0.88,
+        "best_snapshot_url": "/snap_c1.jpg",
+        "status": "active",
+    }
+
+    db.save_session(sess1, db_file)
+    db.save_session(sess2, db_file)
+
+    retrieved = db.get_session_by_id("sess_001", db_file)
+    assert retrieved is not None
+    assert retrieved["species"] == "garibaldi"
+    assert retrieved["duration_seconds"] == 150.0
+
+    # Query all
+    all_sess = db.query_sessions(limit=10, db_path=db_file)
+    assert len(all_sess) == 2
+
+    # Query by stream filter
+    anacapa_sess = db.query_sessions(stream_id="anacapa_kelp_01", db_path=db_file)
+    assert len(anacapa_sess) == 1
+    assert anacapa_sess[0]["session_id"] == "sess_001"
+
+    # Query by status
+    active_sess = db.query_sessions(status="active", db_path=db_file)
+    assert len(active_sess) == 1
+    assert active_sess[0]["session_id"] == "sess_002"
+
+    # Clear sessions
+    cleared = db.clear_sessions(db_file)
+    assert cleared == 2
+    assert len(db.query_sessions(db_path=db_file)) == 0
+
+
+def test_api_sessions_endpoints():
+    """Verify /api/sessions/active, /api/sessions/recent, and /api/sessions/{session_id} endpoints."""
+    client = TestClient(app)
+
+    # Ingest event for stream
+    resp = client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "nuthatch",
+        "confidence": 0.92,
+        "bbox": [10, 10, 50, 50],
+        "snapshot_url": "/snapshots/test_nuthatch.jpg",
+    })
+    assert resp.status_code == 201
+
+    # Check active sessions endpoint
+    active_res = client.get("/api/sessions/active")
+    assert active_res.status_code == 200
+    active_data = active_res.json()
+    assert "active_sessions" in active_data
+    assert active_data["count"] >= 1
+    sess = next(s for s in active_data["active_sessions"] if s["species"] == "nuthatch")
+    assert sess["stream_id"] == "cornell_feeder_01"
+    assert sess["peak_confidence"] == 0.92
+
+    # Check recent sessions endpoint
+    recent_res = client.get("/api/sessions/recent?species=nuthatch")
+    assert recent_res.status_code == 200
+    recent_data = recent_res.json()
+    assert recent_data["total"] >= 1
+    assert any(s["species"] == "nuthatch" for s in recent_data["sessions"])
+
+    # Check single session endpoint
+    sess_id = sess["session_id"]
+    detail_res = client.get(f"/api/sessions/{sess_id}")
+    assert detail_res.status_code == 200
+    detail_data = detail_res.json()
+    assert detail_data["session_id"] == sess_id
+    assert detail_data["species"] == "nuthatch"
+
+    # Test 404 for nonexistent session
+    not_found = client.get("/api/sessions/sess_nonexistent_999")
+    assert not_found.status_code == 404
+
+
+def test_api_analytics_sessions():
+    """Verify /api/analytics/sessions computes dwell time statistics and encounter distributions."""
+    from session_tracker import SightingSessionTracker
+    from server import session_tracker
+
+    # Ensure at least one completed session exists
+    t0 = 1000.0
+    session_tracker.process_event({"stream_id": "test_cam", "species": "otter", "confidence": 0.88}, now_ts=t0)
+    session_tracker.process_event({"stream_id": "test_cam", "species": "otter", "confidence": 0.94}, now_ts=t0 + 45.0)
+    session_tracker.sweep_expired_sessions(now_ts=t0 + 120.0)
+
+    client = TestClient(app)
+    resp = client.get("/api/analytics/sessions")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "total_completed_sessions" in data
+    assert "average_dwell_seconds" in data
+    assert "species_encounter_metrics" in data
+    assert isinstance(data["species_encounter_metrics"], list)
+
+
+def test_index_html_sessions_invariants():
+    """Verify index.html contains Live Encounters widget and loadActiveSessions polling logic."""
+    from server import INDEX_HTML
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert "Live Encounters &amp; Dwell" in html or "Live Encounters & Dwell" in html
+    assert "stat-active-sessions" in html
+    assert "active-sessions-list" in html
+    assert "loadActiveSessions" in html
+    assert "/api/sessions/active" in html
+
+
+
 
 
 
