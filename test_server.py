@@ -482,6 +482,26 @@ def test_multipart_event_upload_endpoint():
     assert any(e["event_id"] == "evt_multipart_456" and "evt_multipart_456.jpg" in e["snapshot_url"] for e in rec)
 
 
+def test_mobile_shell_invariants():
+    """Verify mobile navigation, Field Station identity, and responsive tab layout in index.html."""
+    client = TestClient(app)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "PROJECT OUTPOST" in html
+    assert "Field Station" in html
+    assert "setMobileTab" in html
+    assert "tab-btn-streams" in html
+    assert "tab-btn-sightings" in html
+    assert "tab-btn-station" in html
+    assert "aspect-video" in html
+    assert "tile-anacapa_kelp_01" in html
+    assert "tile-cornell_feeder_01" in html
+    assert "tile-katmai_brooks_falls" in html
+
+
+
 
 
 
