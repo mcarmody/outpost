@@ -245,8 +245,23 @@ def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name
                     current_frame_species.add(label)
                     detection_history[label] = detection_history.get(label, 0) + 1
 
-                    # Temporal persistence: dispatch when detected across 3 consecutive frames
-                    if detection_history[label] == 3:
+                    # Temporal persistence: dispatch once detected across 3
+                    # consecutive frames. Was `== 3`, an exact-match check —
+                    # fires (at most) once ever per species per process
+                    # lifetime, only on the single frame the count crosses
+                    # exactly 3. An animal that stays in frame keeps
+                    # incrementing past 3 and never dispatches again; if the
+                    # count ever dips (a missed frame) and climbs back
+                    # through 3 a second time it would refire, but for
+                    # anything that lingers continuously (a bear standing at
+                    # the falls, as reported live 2026-09-22 08:42 PT) this
+                    # is a fire-at-most-once gate, not a real recheck.
+                    # >= 3, with the counter reset immediately after
+                    # dispatch, fires once per sustained sighting and then
+                    # re-arms — the same species reappearing for another 3
+                    # consecutive frames dispatches again, without spamming
+                    # every single frame while it's continuously in view.
+                    if detection_history[label] >= 3:
                         dispatch_event(
                             api_url=api_url,
                             stream_id=stream_id,
@@ -255,6 +270,7 @@ def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name
                             bbox=[x1, y1, x2, y2],
                             frame=frame,
                         )
+                        detection_history[label] = 0
 
         # Decay history for species not in current frame
         for sp in list(detection_history.keys()):
