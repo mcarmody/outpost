@@ -153,6 +153,28 @@ KNOWN_STREAMS = {
     },
 }
 
+# Human-readable aliases for a KNOWN_STREAMS id. Historically resolved only
+# inside get_stream_embed() — every OTHER consumer (event ingestion, alert
+# rules) treated an alias as an unrelated brand-new stream_id, silently
+# fragmenting one physical camera's telemetry into two disconnected entries.
+# Confirmed live 2026-09-21: test_e2e_pipeline.py posts events with
+# stream_id="katmai_brooks_falls", which created a stray stream_telemetry
+# entry with embed_url=None that then persisted for the rest of the pytest
+# process and broke get_stream_embed's own alias fallback for later tests —
+# the same fragmentation would happen against the real production server if
+# anything (a doc, a frontend typo, a future integration) ever posts an
+# event under this alias instead of the canonical id.
+STREAM_ALIASES: Dict[str, str] = {
+    "katmai_brooks_falls": "katmai_brooks_01",
+}
+
+
+def resolve_stream_id(stream_id: str) -> str:
+    """Canonicalizes a known alias to its real KNOWN_STREAMS id; anything
+    else (a real id, or a genuinely new/custom stream_id) passes through."""
+    return STREAM_ALIASES.get(stream_id, stream_id)
+
+
 stream_telemetry: Dict[str, Dict[str, Any]] = {}
 for sid, info in KNOWN_STREAMS.items():
     stream_telemetry[sid] = {
@@ -429,9 +451,7 @@ async def resolve_stream(stream_id: str, quality: str = "720p", force: bool = Fa
 @app.get("/api/streams/{stream_id}/embed")
 async def get_stream_embed(stream_id: str):
     """Retrieve verified video embed player parameters and fallback links."""
-    stream = stream_telemetry.get(stream_id)
-    if not stream and stream_id == "katmai_brooks_falls":
-        stream = stream_telemetry.get("katmai_brooks_01")
+    stream = stream_telemetry.get(resolve_stream_id(stream_id))
 
     if not stream:
         raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found in telemetry registry.")
@@ -462,6 +482,14 @@ async def get_alerts():
 @app.post("/api/alerts", status_code=201)
 async def create_alert(alert: AlertRule):
     """Register a new target species alert rule."""
+    # Canonicalize the same way process_event() does for incoming events —
+    # a rule registered against an alias (e.g. "katmai_brooks_falls") must
+    # match on the same id the event actually carries after ingestion, or
+    # it silently never fires. Found live 2026-09-21 fixing the sibling
+    # bug in process_event: this rule-side half of the alias needed the
+    # identical fix or alerts scoped to an alias would break instead.
+    if alert.stream_id is not None:
+        alert.stream_id = resolve_stream_id(alert.stream_id)
     alert_rules.append(alert)
     return {"status": "created", "rule": alert}
 
@@ -481,6 +509,12 @@ async def get_webhook_history(limit: int = 20):
 def process_event(event: DetectionEvent) -> dict:
     """Internal event ingestion engine: enforces species allowlist, aggregates stats, and broadcasts via SSE."""
     global total_events_dispatched
+
+    # Canonicalize a known alias (e.g. "katmai_brooks_falls") to its real
+    # KNOWN_STREAMS id before anything else touches stream_telemetry —
+    # otherwise an alias silently creates a second, disconnected telemetry
+    # entry for what is physically the same camera. See STREAM_ALIASES.
+    event.stream_id = resolve_stream_id(event.stream_id)
 
     # Species allowlist check
     if not is_species_allowed(event.stream_id, event.species):
