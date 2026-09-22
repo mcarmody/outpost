@@ -201,7 +201,7 @@ def register_hardware_loop(api_url: Optional[str], stream_id: str, interval_seco
         time.sleep(interval_seconds)
 
 
-def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name: str = "yolo11x.pt", api_url: Optional[str] = "http://localhost:8000"):
+def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name: str = "yolo11x.pt", api_url: Optional[str] = "http://localhost:8000", min_confidence: float = 0.40):
     threading.Thread(
         target=register_hardware_loop, args=(api_url, stream_id), daemon=True
     ).start()
@@ -241,7 +241,7 @@ def run_pipeline(stream_url: str, stream_id: str = "anacapa_kelp_01", model_name
                 label = model.names[cls_id]
                 x1, y1, x2, y2 = [int(v) for v in box.xyxy[0]]
 
-                if conf >= 0.70:
+                if conf >= min_confidence:
                     current_frame_species.add(label)
                     detection_history[label] = detection_history.get(label, 0) + 1
 
@@ -288,7 +288,8 @@ if __name__ == "__main__":
     parser.add_argument("--stream-id", type=str, default="anacapa_kelp_01", help="Identifier for stream")
     parser.add_argument("--model", type=str, default="yolo11x.pt", help="YOLO model or checkpoint")
     parser.add_argument("--api-url", type=str, default="http://localhost:8000", help="Outpost FastAPI telemetry server URL")
+    parser.add_argument("--min-confidence", type=float, default=0.40, help="Minimum confidence threshold for candidate detection")
     args = parser.parse_args()
 
     direct_url = get_stream_url(args.url)
-    run_pipeline(direct_url, args.stream_id, args.model, args.api_url)
+    run_pipeline(direct_url, args.stream_id, args.model, args.api_url, min_confidence=args.min_confidence)

@@ -52,6 +52,16 @@
         </select>
       </div>
 
+      <!-- Confidence Filter -->
+      <div class="relative">
+        <select id="filter-confidence" onchange="loadReviewQueue()" class="bg-stone-800 border border-stone-700 text-stone-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-500 min-h-[34px]">
+          <option value="all">All Confidences</option>
+          <option value="ambiguous" selected>Ambiguous (&lt; 70%)</option>
+          <option value="mid">Around 50% (40% - 60%)</option>
+          <option value="high">High Confidence (70%+)</option>
+        </select>
+      </div>
+
       <!-- Reviewer Switcher -->
       <div class="flex items-center bg-stone-800/90 p-0.5 rounded border border-stone-700 text-xs min-h-[34px]">
         <button id="btn-reviewer-mike" onclick="setReviewer('Mike')" class="px-2.5 py-1 rounded font-medium transition text-stone-400">Mike</button>
@@ -291,7 +301,19 @@
 
     async function loadReviewQueue() {
       const stream = document.getElementById('filter-stream').value;
-      const url = stream ? `/api/review/queue?stream_id=${encodeURIComponent(stream)}&limit=50` : '/api/review/queue?limit=50';
+      const confFilter = document.getElementById('filter-confidence')?.value || 'all';
+      let minConf = 0.0, maxConf = 1.0;
+      if (confFilter === 'ambiguous') {
+        minConf = 0.0; maxConf = 0.70;
+      } else if (confFilter === 'mid') {
+        minConf = 0.40; maxConf = 0.60;
+      } else if (confFilter === 'high') {
+        minConf = 0.70; maxConf = 1.0;
+      }
+      let url = `/api/review/queue?limit=50&min_confidence=${minConf}&max_confidence=${maxConf}`;
+      if (stream) {
+        url += `&stream_id=${encodeURIComponent(stream)}`;
+      }
       
       document.getElementById('loading-spinner').classList.remove('hidden');
       try {
