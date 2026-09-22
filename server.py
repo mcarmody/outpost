@@ -300,6 +300,7 @@ stream_watchdog.register_stream("katmai_brooks_falls", "https://www.youtube.com/
 
 from session_tracker import SightingSessionTracker
 from temporal_filter import TemporalPersistenceFilter
+from biodiversity import BiodiversityEngine, calculate_biodiversity_metrics
 
 session_tracker = SightingSessionTracker(gap_threshold_seconds=60.0)
 temporal_filter = TemporalPersistenceFilter(
@@ -308,6 +309,7 @@ temporal_filter = TemporalPersistenceFilter(
     decay_timeout_seconds=3.0,
     bypass=False,
 )
+biodiversity_engine = BiodiversityEngine(db)
 
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
@@ -684,6 +686,28 @@ async def get_sessions_analytics():
     analytics = session_tracker.get_session_analytics()
     analytics["timestamp"] = time.time()
     return analytics
+
+
+@app.get("/api/analytics/biodiversity")
+async def get_biodiversity_analytics(stream_id: Optional[str] = Query(default=None, description="Optional stream ID filter")):
+    """Retrieve comprehensive ecological biodiversity metrics (Shannon H', Simpson's D, Pielou's J', guilds)."""
+    canonical_stream = resolve_stream_id(stream_id) if stream_id else None
+    return biodiversity_engine.get_overall_biodiversity(stream_id=canonical_stream)
+
+
+@app.get("/api/analytics/biodiversity/comparison")
+async def get_biodiversity_stream_comparison():
+    """Retrieve comparative biodiversity health ranking across all registered streams."""
+    return biodiversity_engine.get_comparative_stream_ranking()
+
+
+@app.get("/api/analytics/biodiversity/{stream_id}")
+async def get_stream_biodiversity(stream_id: str):
+    """Retrieve stream-scoped ecological diversity metrics and species breakdown."""
+    canonical_stream = resolve_stream_id(stream_id)
+    if canonical_stream not in stream_telemetry and stream_id not in stream_telemetry:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found.")
+    return biodiversity_engine.get_overall_biodiversity(stream_id=canonical_stream)
 
 
 

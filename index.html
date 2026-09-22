@@ -269,6 +269,25 @@
             </div>
           </div>
 
+          <!-- Ecological Biodiversity & Health Index -->
+          <div class="mt-4 p-3 rounded-lg bg-stone-950/60 border border-stone-800/80">
+            <div class="flex items-center justify-between text-xs mb-2">
+              <span class="text-stone-300 font-medium flex items-center space-x-1.5">
+                <span>🌿</span>
+                <span>Biodiversity Index (H')</span>
+              </span>
+              <span class="font-mono-nums text-emerald-400 font-semibold text-xs" id="stat-shannon-h">0.00</span>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-stone-400 mb-1.5">
+              <span>Evenness (J'): <span class="font-mono-nums text-stone-200 font-medium" id="stat-evenness-j">0.00</span></span>
+              <span id="stat-bio-health" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">INSUFFICIENT DATA</span>
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-stone-500 border-t border-stone-800/60 pt-1.5">
+              <span>Dominant: <span class="font-mono-nums text-stone-300 capitalize" id="stat-dominant-species">--</span></span>
+              <span>Simpson (1-D): <span class="font-mono-nums text-amber-400 font-medium" id="stat-simpson-d">0.00</span></span>
+            </div>
+          </div>
+
           <div class="pt-4 mt-4 border-t border-stone-800 text-[11px] text-stone-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <span id="hardware-status" class="text-stone-400">Hardware: checking...</span>
             <span class="text-amber-400/90 font-mono-nums text-[10px]">SSE Bus: :8000/events</span>
@@ -930,6 +949,38 @@
     }
     loadTemporalFilterTelemetry();
     setInterval(loadTemporalFilterTelemetry, 15000);
+
+    async function loadBiodiversityTelemetry() {
+      try {
+        const res = await fetch(`${API_BASE}/api/analytics/biodiversity`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const shannonEl = document.getElementById('stat-shannon-h');
+        const evenEl = document.getElementById('stat-evenness-j');
+        const healthEl = document.getElementById('stat-bio-health');
+        const domEl = document.getElementById('stat-dominant-species');
+        const simpEl = document.getElementById('stat-simpson-d');
+
+        if (shannonEl) shannonEl.textContent = Number(data.shannon_diversity_index_h || 0).toFixed(2);
+        if (evenEl) evenEl.textContent = Number(data.pielou_evenness_j || 0).toFixed(2);
+        if (healthEl) {
+          const health = data.ecological_health || 'insufficient_data';
+          healthEl.textContent = health.replace(/_/g, ' ').toUpperCase();
+          healthEl.className = health.includes('exceptional') || health.includes('healthy')
+            ? 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+            : 'px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20';
+        }
+        if (domEl) {
+          const d = data.dominant_species;
+          domEl.textContent = d ? d.replace(/_/g, ' ') : '--';
+        }
+        if (simpEl) simpEl.textContent = Number(data.simpson_index_of_diversity || 0).toFixed(2);
+      } catch (err) {
+        console.warn('Biodiversity telemetry fetch failed:', err);
+      }
+    }
+    loadBiodiversityTelemetry();
+    setInterval(loadBiodiversityTelemetry, 15000);
 
     // Initialize mobile view tab on boot
     setMobileTab('streams');

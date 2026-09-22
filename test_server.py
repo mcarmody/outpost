@@ -1248,6 +1248,107 @@ def test_index_html_temporal_filter_invariants():
     assert "/api/filter/temporal" in html
 
 
+def test_biodiversity_metrics_calculation():
+    """Verify mathematical formulation of Shannon H', Simpson 1-D, Pielou J', and guilds."""
+    from biodiversity import calculate_biodiversity_metrics
+
+    # 1. Multi-species community
+    counts = {
+        "garibaldi": 30,
+        "giant_sea_bass": 10,
+        "kelp_bass": 20,
+        "california_spiny_lobster": 15,
+        "bat_ray": 5,
+    }
+    m = calculate_biodiversity_metrics(counts)
+    assert m["species_richness_s"] == 5
+    assert m["total_abundance_n"] == 80
+    assert m["shannon_diversity_index_h"] > 1.4
+    assert 0.0 < m["simpson_index_of_diversity"] < 1.0
+    assert 0.0 < m["pielou_evenness_j"] <= 1.0
+    assert m["dominant_species"] == "garibaldi"
+    assert m["ecological_health"] in ["healthy_biodiverse", "exceptional_biodiversity"]
+    assert "marine_reef" in m["guild_distribution"]
+
+    # 2. Monoculture (S=1)
+    mono = calculate_biodiversity_metrics({"brown_bear": 50})
+    assert mono["species_richness_s"] == 1
+    assert mono["total_abundance_n"] == 50
+    assert mono["shannon_diversity_index_h"] == 0.0
+    assert mono["simpson_index_of_diversity"] == 0.0
+    assert mono["dominant_species"] == "brown_bear"
+    assert mono["ecological_health"] == "low_diversity_monoculture"
+
+    # 3. Empty community
+    empty = calculate_biodiversity_metrics({})
+    assert empty["species_richness_s"] == 0
+    assert empty["total_abundance_n"] == 0
+    assert empty["ecological_health"] == "insufficient_data"
+
+
+def test_api_analytics_biodiversity_endpoints():
+    """Verify /api/analytics/biodiversity endpoints and stream comparison rankings."""
+    client = TestClient(app)
+
+    # Ingest diverse sightings into SQLite
+    events = [
+        {"stream_id": "cornell_feeder_01", "species": "blue_jay", "confidence": 0.95, "bbox": [15, 15, 45, 45]},
+        {"stream_id": "cornell_feeder_01", "species": "northern_cardinal", "confidence": 0.91, "bbox": [20, 20, 50, 50]},
+        {"stream_id": "katmai_brooks_01", "species": "brown_bear", "confidence": 0.90, "bbox": [30, 30, 80, 80]},
+        {"stream_id": "katmai_brooks_01", "species": "salmon", "confidence": 0.86, "bbox": [5, 5, 25, 25]},
+        {"stream_id": "katmai_brooks_01", "species": "wolf", "confidence": 0.89, "bbox": [12, 12, 40, 40]},
+        {"stream_id": "anacapa_kelp_01", "species": "person", "confidence": 0.94, "bbox": [10, 10, 50, 50]},
+    ]
+    for ev in events:
+        res = client.post("/api/events", json=ev)
+        assert res.status_code in (200, 201)
+
+    # 1. Global biodiversity endpoint
+    r_bio = client.get("/api/analytics/biodiversity")
+    assert r_bio.status_code == 200
+    bio_data = r_bio.json()
+    assert bio_data["species_richness_s"] >= 4
+    assert bio_data["total_abundance_n"] >= 4
+    assert "shannon_diversity_index_h" in bio_data
+    assert "simpson_index_of_diversity" in bio_data
+    assert "pielou_evenness_j" in bio_data
+    assert "guild_distribution" in bio_data
+    assert "broad_category_distribution" in bio_data
+
+    # 2. Stream-specific query
+    r_stream = client.get("/api/analytics/biodiversity/cornell_feeder_01")
+    assert r_stream.status_code == 200
+    stream_data = r_stream.json()
+    assert stream_data["stream_id"] == "cornell_feeder_01"
+
+    # 3. Stream comparison ranking
+    r_comp = client.get("/api/analytics/biodiversity/comparison")
+    assert r_comp.status_code == 200
+    comp_data = r_comp.json()
+    assert "ranked_streams" in comp_data
+    assert len(comp_data["ranked_streams"]) == 3
+    assert "highest_biodiversity_stream" in comp_data
+
+    # 4. Unknown stream returns 404
+    r_404 = client.get("/api/analytics/biodiversity/unknown_fake_camera_stream_99")
+    assert r_404.status_code == 404
+
+
+def test_index_html_biodiversity_invariants():
+    """Verify index.html contains Biodiversity Index HUD and telemetry polling."""
+    from server import INDEX_HTML
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert "Biodiversity Index (H')" in html
+    assert "stat-shannon-h" in html
+    assert "stat-evenness-j" in html
+    assert "stat-bio-health" in html
+    assert "stat-dominant-species" in html
+    assert "stat-simpson-d" in html
+    assert "loadBiodiversityTelemetry" in html
+    assert "/api/analytics/biodiversity" in html
+
+
 
 
 
