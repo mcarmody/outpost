@@ -312,9 +312,18 @@ from temporal_filter import TemporalPersistenceFilter
 from biodiversity import BiodiversityEngine, calculate_biodiversity_metrics
 
 session_tracker = SightingSessionTracker(gap_threshold_seconds=60.0)
+# Mike, #side-project 2026-09-22 18:30 PT: reviewing 70%+ candidates is
+# overkill (those are reliable); the review queue should catch what's
+# actually uncertain. runner.py's own --min-confidence floor moved to 0.40
+# in 48180d5, but this server-side gate was still hardcoded at 0.70 and
+# silently dropped everything the runner sent below it before it ever
+# reached the review queue -- confirmed live: a 0.60 bear detection came
+# back "Stream allowlist filtered: Confidence 0.60 below threshold 0.70"
+# even with the runner restarted on the new flag. Matched to the runner's
+# floor so the two thresholds can't drift apart again.
 temporal_filter = TemporalPersistenceFilter(
     min_hits=1,
-    confidence_threshold=0.70,
+    confidence_threshold=0.40,
     decay_timeout_seconds=3.0,
     bypass=False,
 )
