@@ -19,6 +19,7 @@ import os
 import time
 import uuid
 from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -38,10 +39,49 @@ SNAPSHOTS_DIR = BASE_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_HTML = BASE_DIR / "index.html"
 
+RETENTION_INTERVAL_SECONDS = 900.0  # 15 min
+RETENTION_MAX_AGE_HOURS = 24.0
+RETENTION_MAX_STORAGE_MB = 500.0
+
+
+async def _retention_loop():
+    """Background snapshot pruning, actually wired into the app lifecycle.
+
+    This was claimed done ('wiring the automated background cleanup loop
+    into the FastAPI lifecycle') but never actually landed — only the
+    manual /api/maintenance/prune endpoint existed. Confirmed live
+    2026-09-21 during the hourly check-in: snapshot_storage_mb had grown
+    to 649MB / 1535 files, well past the 500MB ceiling this was supposed
+    to enforce automatically."""
+    while True:
+        try:
+            res = prune_snapshots(
+                SNAPSHOTS_DIR,
+                max_age_hours=RETENTION_MAX_AGE_HOURS,
+                max_storage_mb=RETENTION_MAX_STORAGE_MB,
+            )
+            if res.get("pruned_files"):
+                print(f"[retention] pruned {res['pruned_files']} files, "
+                      f"freed {res['freed_mb']}MB, remaining {res['remaining_mb']}MB")
+        except Exception as e:
+            print(f"[retention] loop error (continuing): {e}")
+        await asyncio.sleep(RETENTION_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    task = asyncio.create_task(_retention_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
 app = FastAPI(
     title="Outpost Wildlife CV Telemetry Bus",
     description="Real-time SSE event dispatcher and ring buffer for public wildlife livestreams",
     version="0.2.0",
+    lifespan=_lifespan,
 )
 
 # Enable CORS for local dev and staged frontends (Vite, Next.js, GitHub Pages)

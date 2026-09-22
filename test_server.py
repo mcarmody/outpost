@@ -195,6 +195,18 @@ def test_simulate_event_integration():
     assert payload["species"]
     assert payload["snapshot_url"].startswith("/snapshots/")
 
+    # simulate.py's own species roster (flavor names for the synthetic
+    # renderer, e.g. "Garibaldi") is intentionally cosmetic and independent
+    # of server.py's real-world per-stream allowlists — some draws
+    # legitimately get filtered (200, not 201). Found live 2026-09-21: this
+    # made the test flaky, and overriding species alone wasn't enough
+    # either — simulate_event() also randomizes stream_id, and "person"
+    # only clears anacapa_kelp_01's allowlist, not Cornell's or Katmai's.
+    # Pin both so this test verifies ingestion mechanics deterministically,
+    # independent of allowlist/simulator drift on any given draw.
+    payload["stream_id"] = "anacapa_kelp_01"
+    payload["species"] = "person"
+
     # Ingest into server
     resp = client.post("/api/events", json=payload)
     assert resp.status_code == 201
