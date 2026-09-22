@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 import pytest
 from fastapi.testclient import TestClient
 from server import (
@@ -13,6 +14,7 @@ from server import (
     recent_alerts,
     alert_rules,
     AlertRule,
+    SNAPSHOTS_DIR,
 )
 
 
@@ -480,6 +482,49 @@ def test_multipart_event_upload_endpoint():
     # Verify recent events has the uploaded snapshot URL
     rec = client.get("/events/recent").json()
     assert any(e["event_id"] == "evt_multipart_456" and "evt_multipart_456.jpg" in e["snapshot_url"] for e in rec)
+
+    # Disallowed species via multipart upload (e.g. bear on cornell_feeder_01)
+    filtered_payload = {
+        "event_id": "evt_multipart_bear",
+        "stream_id": "cornell_feeder_01",
+        "species": "bear",
+        "confidence": 0.78,
+        "bbox": [20, 20, 100, 100],
+    }
+    f_files = {"file": ("bear.jpg", dummy_jpeg, "image/jpeg")}
+    f_data = {"event_data": json.dumps(filtered_payload)}
+    f_resp = client.post("/api/events/upload", files=f_files, data=f_data)
+    assert f_resp.status_code == 200
+    f_res_data = f_resp.json()
+    assert f_res_data["status"] == "filtered"
+    assert f_res_data["filtered"] is True
+    assert "filtered by allowlist" in f_res_data["reason"]
+
+    # Verify filtered snapshot was NOT persisted to disk
+    today_str = time.strftime("%Y%m%d")
+    bear_snapshot = SNAPSHOTS_DIR / today_str / "evt_multipart_bear.jpg"
+    assert not bear_snapshot.exists()
+
+
+def test_runner_edge_allowlist_filtering(monkeypatch):
+    """Verify runner.py client-side allowlist caching and edge pre-filtering (Issue #2)."""
+    from runner import _cached_allowlists, is_species_allowed_edge
+    _cached_allowlists.clear()
+    client = TestClient(app)
+
+    def mock_get(url, timeout=2.0):
+        # Extract endpoint path
+        path = "/" + url.split("://", 1)[-1].split("/", 1)[-1]
+        return client.get(path)
+
+    monkeypatch.setattr("runner.requests.get", mock_get)
+
+    # Cornell feeder allows Northern Cardinal, suppresses bear
+    assert is_species_allowed_edge("http://testserver", "cornell_feeder_01", "Northern Cardinal") is True
+    assert is_species_allowed_edge("http://testserver", "cornell_feeder_01", "bear") is False
+
+    # Katmai allows brown bear
+    assert is_species_allowed_edge("http://testserver", "katmai_brooks_01", "brown_bear") is True
 
 
 def test_mobile_shell_invariants():

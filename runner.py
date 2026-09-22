@@ -16,10 +16,22 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    import streamlink
+except ImportError:
+    streamlink = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
 import requests
-import streamlink
-from ultralytics import YOLO
 
 BASE_DIR = Path(__file__).resolve().parent
 SNAPSHOTS_DIR = BASE_DIR / "snapshots"
@@ -37,6 +49,44 @@ def get_stream_url(youtube_url: str, quality: str = "1080p") -> str:
     return streams["best"].url
 
 
+# Cached stream species allowlists: {stream_id: {"allowed_species": list, "strict": bool, "last_updated": float}}
+_cached_allowlists: dict = {}
+_ALLOWLIST_CACHE_TTL = 300.0  # 5 minutes
+
+
+def is_species_allowed_edge(api_url: Optional[str], stream_id: str, species: str) -> bool:
+    """Edge pre-check against stream species allowlist to suppress out-of-domain false positives (e.g. bear on a feeder cam)."""
+    if not api_url or not stream_id or not species:
+        return True
+
+    now = time.time()
+    cache_entry = _cached_allowlists.get(stream_id)
+    if not cache_entry or (now - cache_entry.get("last_updated", 0) > _ALLOWLIST_CACHE_TTL):
+        try:
+            base = api_url.rstrip("/")
+            res = requests.get(f"{base}/api/streams/{stream_id}/allowlist", timeout=2.0)
+            if res.status_code == 200:
+                data = res.json()
+                _cached_allowlists[stream_id] = {
+                    "allowed_species": [s.strip().lower().replace("_", " ") for s in data.get("allowed_species", [])],
+                    "strict": data.get("strict_filtering", False),
+                    "last_updated": now,
+                }
+                cache_entry = _cached_allowlists[stream_id]
+        except Exception:
+            pass
+
+    if not cache_entry or not cache_entry.get("strict"):
+        return True
+
+    allowed_list = cache_entry.get("allowed_species", [])
+    sp_norm = species.strip().lower().replace("_", " ")
+    for a in allowed_list:
+        if a in sp_norm or sp_norm in a:
+            return True
+    return False
+
+
 def dispatch_event(
     api_url: Optional[str],
     stream_id: str,
@@ -45,6 +95,11 @@ def dispatch_event(
     bbox: list,
     frame=None,
 ):
+    # Edge allowlist pre-filter: avoid encoding/uploading/saving out-of-domain false positives
+    if api_url and not is_species_allowed_edge(api_url, stream_id, species):
+        print(f"[{time.strftime('%X')}] SUPPRESSED (edge allowlist): {species} ({confidence:.2f}) on {stream_id} — out of domain")
+        return
+
     event_id = f"evt_{uuid.uuid4().hex[:8]}"
     today_str = time.strftime("%Y%m%d")
     snapshot_rel_path = f"/snapshots/{today_str}/{event_id}.jpg"

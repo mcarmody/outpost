@@ -658,6 +658,20 @@ async def ingest_event_with_snapshot(
         raise HTTPException(status_code=400, detail=f"Invalid event_data JSON: {e}")
 
     evt = DetectionEvent(**data)
+    canonical_stream = resolve_stream_id(evt.stream_id)
+
+    # Pre-check species allowlist before persisting snapshot to disk
+    if not is_species_allowed(canonical_stream, evt.species):
+        if response:
+            response.status_code = 200
+        return {
+            "status": "filtered",
+            "filtered": True,
+            "event_id": evt.event_id,
+            "stream_id": canonical_stream,
+            "species": evt.species,
+            "reason": f"Species '{evt.species}' filtered by allowlist for stream '{canonical_stream}'",
+        }
 
     today_str = time.strftime("%Y%m%d")
     day_dir = SNAPSHOTS_DIR / today_str
