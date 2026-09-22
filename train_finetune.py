@@ -27,10 +27,11 @@ COCO classes the base model already handled fine).
 import argparse
 import json
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -136,7 +137,12 @@ def build_dataset(manifest: List[Dict[str, Any]], api_url: str, dataset_dir: Pat
         prepared.append((tmp_img, class_index[label], yolo_box))
 
     if not prepared:
-        return {"count": 0, "classes": labels_present, "skipped": skipped}
+        return {"count": 0, "classes": labels_present, "class_counts": {}, "skipped": skipped}
+
+    index_to_label = {i: label for label, i in class_index.items()}
+    class_counts: Dict[str, int] = {label: 0 for label in labels_present}
+    for _, cls_id, _ in prepared:
+        class_counts[index_to_label[cls_id]] += 1
 
     # 80/20 train/val split. With very few examples, ultralytics still
     # needs at least one image in val or training crashes at the first
@@ -175,9 +181,34 @@ def build_dataset(manifest: List[Dict[str, Any]], api_url: str, dataset_dir: Pat
         "train_count": len(train_set),
         "val_count": len(val_set),
         "classes": labels_present,
+        "class_counts": class_counts,
         "skipped": skipped,
         "data_yaml": str(data_yaml),
     }
+
+
+def extract_map50(results: Any) -> Optional[float]:
+    """Pulls mAP50 out of whatever shape ultralytics' train() return value
+    happens to carry -- it's exposed a couple of different ways across
+    versions, so try the known ones and give up cleanly rather than crash
+    a training run over a metrics-reporting quirk."""
+    for attr in ("results_dict", "metrics"):
+        d = getattr(results, attr, None)
+        if isinstance(d, dict):
+            for key in ("metrics/mAP50(B)", "metrics/mAP50"):
+                if key in d:
+                    try:
+                        return float(d[key])
+                    except (TypeError, ValueError):
+                        pass
+    box = getattr(results, "box", None)
+    map50 = getattr(box, "map50", None)
+    if map50 is not None:
+        try:
+            return float(map50)
+        except (TypeError, ValueError):
+            pass
+    return None
 
 
 def main():
@@ -189,6 +220,15 @@ def main():
     parser.add_argument("--min-examples", type=int, default=4,
                          help="Refuse to launch a training run with fewer than this many labeled examples total")
     parser.add_argument("--output-model", type=str, default=str(DEFAULT_OUTPUT_MODEL))
+    parser.add_argument("--auto-deploy", action="store_true",
+                         help="If the trained checkpoint clears --min-map50 and --min-per-class, "
+                              "copy it to the active-model path and restart the live runners on it")
+    parser.add_argument("--min-map50", type=float, default=0.50,
+                         help="Deploy gate: minimum validation mAP50 the new checkpoint must clear")
+    parser.add_argument("--min-per-class", type=int, default=15,
+                         help="Deploy gate: minimum training examples for EVERY class in the dataset "
+                              "-- a model that has only ever seen one 'lobster' isn't ready to go live "
+                              "on that class no matter how well the well-represented classes score")
     args = parser.parse_args()
 
     if YOLO is None:
@@ -249,15 +289,63 @@ def main():
         "run_dir": str(run_dir),
         "output_model": str(output_path),
     }
+    map50 = extract_map50(results)
+    metadata["val_map50"] = map50
+    metadata["class_counts"] = stats.get("class_counts", {})
     (output_path.with_suffix(".json")).write_text(json.dumps(metadata, indent=2))
 
     print(f"[*] Fine-tuned weights: {output_path}")
     print(f"[*] Metadata: {output_path.with_suffix('.json')}")
-    print(
-        "[*] NOT deployed automatically. Review the run's val metrics in "
-        f"{run_dir} before pointing any runner at this checkpoint "
-        f"(--model {output_path})."
-    )
+    print(f"[*] Validation mAP50: {map50}")
+
+    if not args.auto_deploy:
+        print(
+            "[*] NOT deployed (--auto-deploy not passed). Review the run's val metrics in "
+            f"{run_dir} before pointing any runner at this checkpoint (--model {output_path})."
+        )
+        return
+
+    # Deploy gate. Mike, #side-project 2026-09-22 18:50 PT: pick a data
+    # threshold for when it's appropriate to auto-deploy, and implement it.
+    # Two conditions, both required:
+    #  1. mAP50 on held-out val data clears --min-map50 -- a raw example
+    #     count says nothing about whether the resulting model is actually
+    #     any good; a bad run with "enough" data would sail through a
+    #     count-only gate and go live anyway.
+    #  2. every class in the dataset has at least --min-per-class examples
+    #     -- an aggregate mAP can look fine while one rare class (e.g. a
+    #     single "lobster") is essentially unlearned; count-only or
+    #     mAP-only gating both miss that a model can be simultaneously
+    #     "well trained" on the whole and worthless on the part that
+    #     hasn't accumulated enough review volume yet.
+    class_counts = stats.get("class_counts", {})
+    under_min = {c: n for c, n in class_counts.items() if n < args.min_per_class}
+    reasons = []
+    if map50 is None:
+        reasons.append("could not read a validation mAP50 from this run")
+    elif map50 < args.min_map50:
+        reasons.append(f"mAP50 {map50:.3f} below --min-map50={args.min_map50}")
+    if under_min:
+        reasons.append(f"under --min-per-class={args.min_per_class}: {under_min}")
+
+    if reasons:
+        print(f"[!] NOT deploying -- {'; '.join(reasons)}. Checkpoint kept at {output_path} for inspection.")
+        sys.exit(3)
+
+    print(f"[*] Deploy gate cleared (mAP50={map50:.3f}, min class count {min(class_counts.values())}). Deploying...")
+    active_path = MODELS_DIR / "active.pt"
+    shutil.copy(output_path, active_path)
+    (active_path.with_suffix(".json")).write_text(json.dumps(metadata, indent=2))
+
+    restart_script = BASE_DIR / "restart_runners.py"
+    if restart_script.exists():
+        rc = subprocess.run([sys.executable, str(restart_script), "--model", str(active_path)]).returncode
+        if rc != 0:
+            print(f"[!] restart_runners.py exited {rc} -- new weights are at {active_path} but runners may not be using them. Restart manually.")
+        else:
+            print(f"[*] Runners restarted on {active_path}.")
+    else:
+        print(f"[!] {restart_script} not found -- weights deployed to {active_path} but runners were NOT restarted automatically.")
 
 
 if __name__ == "__main__":
