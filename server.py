@@ -23,9 +23,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -501,6 +501,58 @@ async def get_recent_events(
     return events[-capped_limit:]
 
 
+@app.get("/api/events/export")
+async def export_events(
+    format: str = Query(default="csv", description="Export format: csv or json"),
+    stream_id: Optional[str] = Query(default=None),
+    species: Optional[str] = Query(default=None),
+    since: Optional[str] = Query(default=None),
+    limit: int = Query(default=1000, ge=1, le=5000),
+):
+    """Export historical detection sightings as downloadable CSV or JSON files."""
+    fmt = format.lower().strip()
+    if fmt not in ["csv", "json"]:
+        raise HTTPException(status_code=400, detail="Unsupported export format. Choose 'csv' or 'json'.")
+
+    canonical_stream = resolve_stream_id(stream_id) if stream_id else None
+    events = db.query_events(limit=limit, stream_id=canonical_stream, species=species, since=since, order="asc")
+
+    timestamp_suffix = int(time.time())
+    if fmt == "json":
+        filename = f"outpost_sightings_{timestamp_suffix}.json"
+        return JSONResponse(
+            content=events,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # Format as CSV
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["event_id", "timestamp", "stream_id", "species", "confidence", "bbox", "snapshot_url"])
+    for e in events:
+        bbox_str = f"[{','.join(str(x) for x in e.get('bbox', []))}]"
+        writer.writerow([
+            e.get("event_id", ""),
+            e.get("timestamp", ""),
+            e.get("stream_id", ""),
+            e.get("species", ""),
+            e.get("confidence", 0.0),
+            bbox_str,
+            e.get("snapshot_url", ""),
+        ])
+
+    csv_data = output.getvalue()
+    filename = f"outpost_sightings_{timestamp_suffix}.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/events/{event_id}", response_model=DetectionEvent)
 async def get_event_by_id(event_id: str):
     """Retrieve a specific detection event from ring buffer or persistent SQLite by ID."""
@@ -517,6 +569,16 @@ async def get_event_by_id(event_id: str):
 async def get_database_stats():
     """Retrieve persistent SQLite database telemetry and storage stats."""
     return db.get_db_stats()
+
+
+@app.get("/api/analytics/activity")
+async def get_activity_analytics(
+    hours: int = Query(default=24, ge=1, le=168, description="Analysis lookback window in hours"),
+    stream_id: Optional[str] = Query(default=None, description="Optional stream ID filter"),
+):
+    """Retrieve time-bucketed hourly detection trends, diurnal patterns, and peak activity hours."""
+    canonical_stream = resolve_stream_id(stream_id) if stream_id else None
+    return db.get_hourly_activity(hours=hours, stream_id=canonical_stream)
 
 
 

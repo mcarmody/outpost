@@ -270,6 +270,110 @@ def get_species_stats_summary(
         conn.close()
 
 
+def get_hourly_activity(
+    hours: int = 24,
+    stream_id: Optional[str] = None,
+    db_path: Optional[Union[Path, str]] = None,
+) -> Dict[str, Any]:
+    """Retrieve time-bucketed hourly activity trends, peak hour, and species distribution."""
+    hours = max(1, min(hours, 168))
+    cutoff_time = time.time() - (hours * 3600.0)
+    cutoff_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_time))
+
+    conn = get_db_connection(db_path)
+    try:
+        where_clauses = ["timestamp >= ?"]
+        params: List[Any] = [cutoff_str]
+
+        if stream_id:
+            where_clauses.append("stream_id = ?")
+            params.append(stream_id)
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}"
+
+        # Query bucketed hourly stats
+        query_buckets = f"""
+            SELECT substr(timestamp, 1, 13) || ':00:00Z' AS hour_bucket,
+                   COUNT(*) AS count,
+                   COUNT(DISTINCT species) AS unique_species,
+                   GROUP_CONCAT(DISTINCT stream_id) AS streams_csv
+            FROM detection_events
+            {where_sql}
+            GROUP BY hour_bucket
+            ORDER BY hour_bucket ASC
+        """
+        cursor = conn.execute(query_buckets, params)
+        rows = cursor.fetchall()
+
+        # Query top species per hour
+        query_top_species = f"""
+            SELECT substr(timestamp, 1, 13) || ':00:00Z' AS hour_bucket,
+                   species,
+                   COUNT(*) AS sp_count
+            FROM detection_events
+            {where_sql}
+            GROUP BY hour_bucket, species
+            ORDER BY hour_bucket ASC, sp_count DESC
+        """
+        cursor_sp = conn.execute(query_top_species, params)
+        sp_rows = cursor_sp.fetchall()
+
+        hour_top_sp: Dict[str, str] = {}
+        for r in sp_rows:
+            hb = r["hour_bucket"]
+            if hb not in hour_top_sp:
+                hour_top_sp[hb] = r["species"]
+
+        buckets = []
+        total_detections = 0
+        peak_hour = None
+        peak_count = 0
+        all_streams = set()
+
+        for r in rows:
+            hb = r["hour_bucket"]
+            cnt = r["count"]
+            total_detections += cnt
+            streams = [s.strip() for s in r["streams_csv"].split(",") if s.strip()] if r["streams_csv"] else []
+            all_streams.update(streams)
+
+            if cnt > peak_count:
+                peak_count = cnt
+                peak_hour = hb
+
+            buckets.append({
+                "hour": hb,
+                "count": cnt,
+                "unique_species": r["unique_species"],
+                "top_species": hour_top_sp.get(hb, "unknown"),
+                "streams": streams,
+            })
+
+        # Species distribution within window
+        query_dist = f"""
+            SELECT species, COUNT(*) as count
+            FROM detection_events
+            {where_sql}
+            GROUP BY species
+            ORDER BY count DESC
+        """
+        cursor_dist = conn.execute(query_dist, params)
+        species_dist = [{"species": r["species"], "count": r["count"]} for r in cursor_dist.fetchall()]
+
+        return {
+            "time_window_hours": hours,
+            "since": cutoff_str,
+            "total_detections": total_detections,
+            "unique_species": len(species_dist),
+            "peak_hour": {"hour": peak_hour, "count": peak_count} if peak_hour else None,
+            "hourly_buckets": buckets,
+            "species_distribution": species_dist,
+            "active_streams": sorted(all_streams),
+        }
+    finally:
+        conn.close()
+
+
 def get_db_stats(db_path: Optional[Union[Path, str]] = None) -> Dict[str, Any]:
     """Retrieve database metrics, file size, and record counts."""
     resolved_path = get_db_path(db_path)

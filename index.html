@@ -203,6 +203,31 @@
               <option value="Northern Cardinal">Northern Cardinal</option>
               <option value="Giant Kelp Bass">Giant Kelp Bass</option>
             </select>
+
+            <!-- 24-Hour Activity Pulse & Telemetry Export -->
+            <div class="mt-4 pt-3 border-t border-stone-800">
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="font-medium text-stone-300 flex items-center space-x-1.5">
+                  <i class="fa-solid fa-chart-simple text-amber-400"></i>
+                  <span>Activity Pulse (24h)</span>
+                </span>
+                <span class="font-mono-nums text-amber-400 font-semibold" id="stat-24h-detections">0 sightings</span>
+              </div>
+              <div class="flex items-center justify-between text-[10px] text-stone-500 mb-1.5">
+                <span>Peak Hour: <span id="stat-peak-hour" class="font-mono-nums text-stone-300">--</span></span>
+                <span>Active Feeds: <span id="stat-active-feeds" class="font-mono-nums text-stone-300">--</span></span>
+              </div>
+              <!-- Sparkline Bar Container -->
+              <div id="activity-sparkline" class="flex items-end space-x-1 h-8 bg-stone-950/80 rounded p-1 border border-stone-800/80 overflow-hidden">
+                <span class="text-[10px] text-stone-600 self-center mx-auto">Awaiting activity telemetry</span>
+              </div>
+
+              <!-- Export CSV Button -->
+              <a href="/api/events/export?format=csv" download class="mt-2.5 w-full py-1.5 px-2.5 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-stone-100 border border-stone-700 text-[11px] font-medium flex items-center justify-center space-x-2 transition" title="Download historical field sightings as CSV">
+                <i class="fa-solid fa-file-csv text-amber-400"></i>
+                <span>Export Field Journal (CSV)</span>
+              </a>
+            </div>
           </div>
 
           <div class="pt-4 mt-4 border-t border-stone-800 text-[11px] text-stone-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -763,6 +788,43 @@
       const banner = document.getElementById('alert-banner');
       if (banner) banner.classList.add('hidden');
     }
+
+    async function loadActivityAnalytics() {
+      try {
+        const res = await fetch(`${API_BASE}/api/analytics/activity?hours=24`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const countEl = document.getElementById('stat-24h-detections');
+        const peakEl = document.getElementById('stat-peak-hour');
+        const feedsEl = document.getElementById('stat-active-feeds');
+        const sparkEl = document.getElementById('activity-sparkline');
+
+        if (countEl) countEl.textContent = `${data.total_detections} sightings`;
+        if (peakEl) {
+          if (data.peak_hour && data.peak_hour.hour) {
+            const hourPart = data.peak_hour.hour.substring(11, 16);
+            peakEl.textContent = `${hourPart} UTC (${data.peak_hour.count})`;
+          } else {
+            peakEl.textContent = 'None';
+          }
+        }
+        if (feedsEl) feedsEl.textContent = `${data.active_streams.length} feeds`;
+
+        if (sparkEl && data.hourly_buckets && data.hourly_buckets.length > 0) {
+          const maxCnt = Math.max(...data.hourly_buckets.map(b => b.count), 1);
+          sparkEl.innerHTML = data.hourly_buckets.map(b => {
+            const hPct = Math.max(15, Math.round((b.count / maxCnt) * 100));
+            const timeLabel = b.hour.substring(11, 16);
+            return `<div class="flex-1 bg-amber-500/70 hover:bg-amber-400 transition-all rounded-t-sm" style="height: ${hPct}%;" title="${timeLabel}: ${b.count} sightings (${b.top_species})"></div>`;
+          }).join('');
+        }
+      } catch (err) {
+        console.warn('Activity analytics fetch failed:', err);
+      }
+    }
+    loadActivityAnalytics();
+    setInterval(loadActivityAnalytics, 30000);
 
     // Initialize mobile view tab on boot
     setMobileTab('streams');

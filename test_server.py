@@ -822,6 +822,136 @@ def test_database_event_pruning():
     assert db.get_event("evt_fresh_01") is not None
 
 
+def test_get_hourly_activity_db():
+    """Verify db.get_hourly_activity groups events by hour and computes peak activity."""
+    now = time.time()
+    t_now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    t_minus_1h = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600))
+
+    db.save_event({
+        "event_id": "evt_hour_01",
+        "timestamp": t_now,
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.88,
+        "bbox": [10, 10, 50, 50],
+    })
+    db.save_event({
+        "event_id": "evt_hour_02",
+        "timestamp": t_now,
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.95,
+        "bbox": [10, 10, 50, 50],
+    })
+    db.save_event({
+        "event_id": "evt_hour_03",
+        "timestamp": t_minus_1h,
+        "stream_id": "anacapa_kelp_01",
+        "species": "garibaldi",
+        "confidence": 0.91,
+        "bbox": [20, 20, 80, 80],
+    })
+
+    res = db.get_hourly_activity(hours=6)
+    assert res["total_detections"] == 3
+    assert res["unique_species"] == 3
+    assert len(res["hourly_buckets"]) >= 1
+    assert res["peak_hour"] is not None
+    assert res["peak_hour"]["count"] >= 1
+    assert "cornell_feeder_01" in res["active_streams"]
+    assert "anacapa_kelp_01" in res["active_streams"]
+
+
+def test_api_analytics_activity_endpoint():
+    """Verify GET /api/analytics/activity returns structured hourly trends."""
+    client = TestClient(app)
+    # Insert test events
+    now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.90,
+        "bbox": [10, 10, 50, 50],
+    })
+
+    resp = client.get("/api/analytics/activity?hours=12")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "hourly_buckets" in data
+    assert "total_detections" in data
+    assert data["total_detections"] >= 1
+    assert "peak_hour" in data
+    assert "species_distribution" in data
+
+
+def test_api_events_export_csv():
+    """Verify GET /api/events/export?format=csv returns downloadable CSV stream."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.92,
+        "bbox": [15, 15, 60, 60],
+    })
+
+    resp = client.get("/api/events/export?format=csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+    assert "attachment; filename=" in resp.headers["content-disposition"]
+    assert "outpost_sightings_" in resp.headers["content-disposition"]
+
+    lines = resp.text.strip().split("\r\n")
+    if len(lines) == 1:
+        lines = resp.text.strip().split("\n")
+    assert len(lines) >= 2
+    assert "event_id,timestamp,stream_id,species,confidence,bbox,snapshot_url" in lines[0]
+    assert "cornell_feeder_01" in resp.text
+    assert "cardinal" in resp.text
+
+
+def test_api_events_export_json():
+    """Verify GET /api/events/export?format=json returns downloadable JSON array."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "stream_id": "cornell_feeder_01",
+        "species": "goldfinch",
+        "confidence": 0.89,
+        "bbox": [5, 5, 25, 25],
+    })
+
+    resp = client.get("/api/events/export?format=json")
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers["content-type"]
+    assert "attachment; filename=" in resp.headers["content-disposition"]
+    data = resp.json()
+    assert isinstance(data, list)
+    assert any(e.get("species") == "goldfinch" for e in data)
+
+
+def test_api_events_export_invalid_format():
+    """Verify GET /api/events/export rejects unsupported format."""
+    client = TestClient(app)
+    resp = client.get("/api/events/export?format=xml")
+    assert resp.status_code == 400
+    assert "Unsupported export format" in resp.json()["detail"]
+
+
+def test_index_html_activity_pulse_and_export_invariants():
+    """Verify index.html contains Activity Pulse UI elements and CSV export link."""
+    from server import INDEX_HTML
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert "Activity Pulse (24h)" in html
+    assert "stat-24h-detections" in html
+    assert "stat-peak-hour" in html
+    assert "activity-sparkline" in html
+    assert "loadActivityAnalytics" in html
+    assert "Export Field Journal (CSV)" in html
+    assert "/api/events/export?format=csv" in html
+
+
+
 
 
 
