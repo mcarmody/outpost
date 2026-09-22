@@ -9,10 +9,14 @@ Provides durable storage, indexing, and restart survivability for detection even
 """
 
 import json
+import logging
 import os
 import sqlite3
 import time
+import uuid
 from pathlib import Path
+
+logger = logging.getLogger("outpost.db")
 from typing import Any, Dict, List, Optional, Union
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -113,6 +117,48 @@ def init_db(db_path: Optional[Union[Path, str]] = None) -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_sessions_status
                 ON sighting_sessions (status);
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS human_reviews (
+                    review_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    stream_id TEXT NOT NULL,
+                    proposed_species TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    snapshot_url TEXT,
+                    bbox_json TEXT,
+                    decision TEXT NOT NULL,
+                    confirmed_species TEXT,
+                    notes TEXT,
+                    reviewer TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_reviews_event
+                ON human_reviews (event_id);
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_reviews_stream_time
+                ON human_reviews (stream_id, timestamp DESC);
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_reviews_decision
+                ON human_reviews (decision);
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_reviews_reviewer
+                ON human_reviews (reviewer);
                 """
             )
     finally:
@@ -586,4 +632,251 @@ def clear_sessions(db_path: Optional[Union[Path, str]] = None) -> int:
         return deleted
     finally:
         conn.close()
+
+
+def save_review(review: Dict[str, Any], db_path: Optional[Union[Path, str]] = None) -> bool:
+    """Persist or update a human reinforcement review decision."""
+    conn = get_db_connection(db_path)
+    try:
+        review_id = review.get("review_id") or f"rev_{uuid.uuid4().hex[:8]}"
+        event_id = review.get("event_id")
+        stream_id = review.get("stream_id", "")
+        proposed_species = review.get("proposed_species", "")
+        confidence = float(review.get("confidence", 0.0))
+        snapshot_url = review.get("snapshot_url")
+        bbox = review.get("bbox") or review.get("bbox_json")
+        bbox_json = json.dumps(bbox) if isinstance(bbox, (list, dict)) else (bbox or "[]")
+        decision = review.get("decision", "accept").lower()
+        confirmed_species = review.get("confirmed_species") or proposed_species
+        notes = review.get("notes") or ""
+        reviewer = review.get("reviewer", "Mike")
+        timestamp = review.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO human_reviews (
+                    review_id, event_id, stream_id, proposed_species,
+                    confidence, snapshot_url, bbox_json, decision,
+                    confirmed_species, notes, reviewer, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    event_id,
+                    stream_id,
+                    proposed_species,
+                    confidence,
+                    snapshot_url,
+                    bbox_json,
+                    decision,
+                    confirmed_species,
+                    notes,
+                    reviewer,
+                    timestamp,
+                ),
+            )
+        return True
+    except Exception as e:
+        logger.error(f"Error saving human review {review.get('event_id')}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_review_by_id(review_id: str, db_path: Optional[Union[Path, str]] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single review by review_id."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM human_reviews WHERE review_id = ?", (review_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        try:
+            res["bbox"] = json.loads(res.get("bbox_json") or "[]")
+        except Exception:
+            res["bbox"] = []
+        return res
+    finally:
+        conn.close()
+
+
+def get_review_by_event_id(event_id: str, db_path: Optional[Union[Path, str]] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single review by event_id."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.execute("SELECT * FROM human_reviews WHERE event_id = ?", (event_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        try:
+            res["bbox"] = json.loads(res.get("bbox_json") or "[]")
+        except Exception:
+            res["bbox"] = []
+        return res
+    finally:
+        conn.close()
+
+
+def query_reviews(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    decision: Optional[str] = None,
+    reviewer: Optional[str] = None,
+    db_path: Optional[Union[Path, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Query human review records with filtering."""
+    conn = get_db_connection(db_path)
+    try:
+        clauses = []
+        params = []
+        if stream_id:
+            clauses.append("stream_id = ?")
+            params.append(stream_id)
+        if decision:
+            clauses.append("decision = ?")
+            params.append(decision.lower())
+        if reviewer:
+            clauses.append("reviewer = ?")
+            params.append(reviewer)
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT * FROM human_reviews
+            {where_sql}
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        cursor = conn.execute(query, params)
+        results = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            try:
+                d["bbox"] = json.loads(d.get("bbox_json") or "[]")
+            except Exception:
+                d["bbox"] = []
+            results.append(d)
+        return results
+    finally:
+        conn.close()
+
+
+def get_review_queue(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    min_confidence: float = 0.0,
+    max_confidence: float = 1.0,
+    db_path: Optional[Union[Path, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve detection events that have not yet been reviewed by humans."""
+    conn = get_db_connection(db_path)
+    try:
+        clauses = ["hr.review_id IS NULL"]
+        params = []
+        if stream_id:
+            clauses.append("e.stream_id = ?")
+            params.append(stream_id)
+        if min_confidence > 0.0:
+            clauses.append("e.confidence >= ?")
+            params.append(min_confidence)
+        if max_confidence < 1.0:
+            clauses.append("e.confidence <= ?")
+            params.append(max_confidence)
+
+        where_sql = f"WHERE {' AND '.join(clauses)}"
+        query = f"""
+            SELECT e.event_id, e.timestamp, e.stream_id, e.species,
+                   e.confidence, e.bbox_json, e.snapshot_url, e.metadata_json
+            FROM detection_events e
+            LEFT JOIN human_reviews hr ON e.event_id = hr.event_id
+            {where_sql}
+            ORDER BY e.timestamp DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        cursor = conn.execute(query, params)
+        results = []
+        for r in cursor.fetchall():
+            results.append(row_to_event_dict(r))
+        return results
+    finally:
+        conn.close()
+
+
+def get_review_stats(db_path: Optional[Union[Path, str]] = None) -> Dict[str, Any]:
+    """Calculate aggregate stats for human reinforcement reviews."""
+    conn = get_db_connection(db_path)
+    try:
+        # Total reviews
+        cur = conn.execute("SELECT COUNT(*) as total FROM human_reviews")
+        total = cur.fetchone()["total"]
+
+        # Decisions
+        cur = conn.execute(
+            """
+            SELECT decision, COUNT(*) as count
+            FROM human_reviews
+            GROUP BY decision
+            """
+        )
+        decisions = {r["decision"]: r["count"] for r in cur.fetchall()}
+
+        # Reviewers
+        cur = conn.execute(
+            """
+            SELECT reviewer, COUNT(*) as count
+            FROM human_reviews
+            GROUP BY reviewer
+            """
+        )
+        reviewers = {r["reviewer"]: r["count"] for r in cur.fetchall()}
+
+        # By stream
+        cur = conn.execute(
+            """
+            SELECT stream_id, COUNT(*) as count
+            FROM human_reviews
+            GROUP BY stream_id
+            """
+        )
+        streams = {r["stream_id"]: r["count"] for r in cur.fetchall()}
+
+        # Queue remaining count
+        cur = conn.execute(
+            """
+            SELECT COUNT(*) as queue_count
+            FROM detection_events e
+            LEFT JOIN human_reviews hr ON e.event_id = hr.event_id
+            WHERE hr.review_id IS NULL
+            """
+        )
+        queue_count = cur.fetchone()["queue_count"]
+
+        return {
+            "total_reviews": total,
+            "queue_remaining": queue_count,
+            "accepted": decisions.get("accept", 0),
+            "rejected": decisions.get("reject", 0),
+            "relabelled": decisions.get("relabel", 0),
+            "decisions": decisions,
+            "reviewers": reviewers,
+            "streams": streams,
+        }
+    finally:
+        conn.close()
+
+
+def clear_reviews(db_path: Optional[Union[Path, str]] = None) -> int:
+    """Clear all records from human_reviews table (for test isolation)."""
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.execute("DELETE FROM human_reviews")
+            return cursor.rowcount
+    finally:
+        conn.close()
+
 

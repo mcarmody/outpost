@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 import pytest
 
 # Ensure isolated SQLite database per test process to prevent cross-run interference
@@ -1347,6 +1348,198 @@ def test_index_html_biodiversity_invariants():
     assert "stat-simpson-d" in html
     assert "loadBiodiversityTelemetry" in html
     assert "/api/analytics/biodiversity" in html
+
+
+def test_review_page_and_html_invariants():
+    """Verify /review subpage serves the active learning review interface."""
+    client = TestClient(app)
+    res = client.get("/review")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    html = res.text
+    assert "RLHF REVIEW" in html
+    assert "btn-reviewer-mike" in html
+    assert "btn-reviewer-ryan" in html
+    assert "candidate-image" in html
+    assert "bbox-canvas" in html
+    assert "input-notes" in html
+    assert "submitDecision('accept')" in html
+    assert "submitDecision('reject')" in html
+    assert "submitDecision('relabel')" in html
+    assert "/api/review/queue" in html
+    assert "/api/review/submit" in html
+
+    # Verify index.html contains the /review link in header
+    from server import INDEX_HTML
+    index_content = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'href="/review"' in index_content
+    assert "Review" in index_content
+
+
+def test_db_human_reviews_crud(tmp_path):
+    """Verify SQLite persistence, indexing, and queue queries for human reviews."""
+    db_file = tmp_path / "test_reviews.db"
+    db.init_db(db_file)
+
+    # 1. Initially queue is empty
+    queue = db.get_review_queue(db_path=db_file)
+    assert len(queue) == 0
+
+    # 2. Insert two detection events
+    evt1 = {
+        "event_id": "evt_test_001",
+        "timestamp": "2026-09-22T10:00:00Z",
+        "stream_id": "anacapa_kelp_01",
+        "species": "garibaldi",
+        "confidence": 0.88,
+        "bbox": [100, 200, 300, 400],
+        "snapshot_url": "/snapshots/snap1.jpg",
+        "metadata": {},
+    }
+    evt2 = {
+        "event_id": "evt_test_002",
+        "timestamp": "2026-09-22T10:05:00Z",
+        "stream_id": "anacapa_kelp_01",
+        "species": "kelp_frond",
+        "confidence": 0.42,
+        "bbox": [50, 60, 150, 180],
+        "snapshot_url": "/snapshots/snap2.jpg",
+        "metadata": {},
+    }
+    db.save_event(evt1, db_path=db_file)
+    db.save_event(evt2, db_path=db_file)
+
+    # 3. Both events now in review queue
+    queue = db.get_review_queue(db_path=db_file)
+    assert len(queue) == 2
+    assert queue[0]["event_id"] == "evt_test_002"  # Newest first
+
+    # 4. Save review for evt1 (Accept)
+    rev1 = {
+        "review_id": "rev_001",
+        "event_id": "evt_test_001",
+        "stream_id": "anacapa_kelp_01",
+        "proposed_species": "garibaldi",
+        "confidence": 0.88,
+        "snapshot_url": "/snapshots/snap1.jpg",
+        "bbox": [100, 200, 300, 400],
+        "decision": "accept",
+        "confirmed_species": "garibaldi",
+        "notes": "Crisp profile of adult Garibaldi",
+        "reviewer": "Mike",
+    }
+    assert db.save_review(rev1, db_path=db_file) is True
+
+    # 5. Queue now only has evt2 remaining
+    queue = db.get_review_queue(db_path=db_file)
+    assert len(queue) == 1
+    assert queue[0]["event_id"] == "evt_test_002"
+
+    # 6. Retrieve review by ID and Event ID
+    r_by_id = db.get_review_by_id("rev_001", db_path=db_file)
+    assert r_by_id is not None
+    assert r_by_id["decision"] == "accept"
+    assert r_by_id["notes"] == "Crisp profile of adult Garibaldi"
+
+    r_by_evt = db.get_review_by_event_id("evt_test_001", db_path=db_file)
+    assert r_by_evt is not None
+    assert r_by_evt["reviewer"] == "Mike"
+
+    # 7. Check stats
+    stats = db.get_review_stats(db_path=db_file)
+    assert stats["total_reviews"] == 1
+    assert stats["queue_remaining"] == 1
+    assert stats["accepted"] == 1
+    assert stats["reviewers"]["Mike"] == 1
+
+    # 8. Clear reviews
+    deleted = db.clear_reviews(db_path=db_file)
+    assert deleted == 1
+    assert len(db.query_reviews(db_path=db_file)) == 0
+
+
+def test_api_review_lifecycle_endpoints():
+    """Test full API review cycle: queue retrieval, submission, filtering, and export."""
+    client = TestClient(app)
+    db.clear_reviews()
+
+    # 1. Seed a test event
+    evt_id = f"evt_rf_{uuid.uuid4().hex[:6]}"
+    ingest_res = client.post(
+        "/api/events",
+        json={
+            "event_id": evt_id,
+            "stream_id": "anacapa_kelp_01",
+            "species": "person",
+            "confidence": 0.88,
+            "bbox": [120, 150, 280, 320],
+            "snapshot_url": "/snapshots/test_fish.jpg",
+        },
+    )
+    assert ingest_res.status_code == 201
+
+    # 2. Check queue
+    q_res = client.get("/api/review/queue?stream_id=anacapa_kelp_01")
+    assert q_res.status_code == 200
+    q_data = q_res.json()
+    assert q_data["count"] >= 1
+    found = any(c["event_id"] == evt_id for c in q_data["queue"])
+    assert found is True
+
+    # 3. Submit human review with decision, notes, and reviewer
+    sub_res = client.post(
+        "/api/review/submit",
+        json={
+            "event_id": evt_id,
+            "decision": "relabel",
+            "confirmed_species": "bat ray",
+            "notes": "Wings visible gliding across kelp bed",
+            "reviewer": "Ryan",
+        },
+    )
+    assert sub_res.status_code == 201
+    sub_data = sub_res.json()
+    assert sub_data["status"] == "reviewed"
+    assert sub_data["decision"] == "relabel"
+    assert sub_data["confirmed_species"] == "bat ray"
+    assert sub_data["reviewer"] == "Ryan"
+    assert sub_data["notes"] == "Wings visible gliding across kelp bed"
+
+    # 4. Candidate should now be removed from unreviewed queue
+    q_res2 = client.get("/api/review/queue?stream_id=anacapa_kelp_01")
+    q_data2 = q_res2.json()
+    assert not any(c["event_id"] == evt_id for c in q_data2["queue"])
+
+    # 5. History query
+    hist_res = client.get("/api/review/history?reviewer=Ryan")
+    assert hist_res.status_code == 200
+    hist_data = hist_res.json()
+    assert hist_data["count"] >= 1
+    assert hist_data["reviews"][0]["event_id"] == evt_id
+
+    # 6. Stats query
+    stats_res = client.get("/api/review/stats")
+    assert stats_res.status_code == 200
+    stats_data = stats_res.json()
+    assert stats_data["total_reviews"] >= 1
+    assert stats_data["relabelled"] >= 1
+
+    # 7. Dataset export
+    export_json = client.get("/api/review/export?format=json&decision=relabel")
+    assert export_json.status_code == 200
+    assert export_json.json()["count"] >= 1
+
+    export_yolo = client.get("/api/review/export?format=yolo_manifest&decision=relabel")
+    assert export_yolo.status_code == 200
+    assert export_yolo.json()["format"] == "yolo_manifest"
+    assert len(export_yolo.json()["manifest"]) >= 1
+
+    # 8. Invalid decision validation
+    bad_res = client.post(
+        "/api/review/submit",
+        json={"event_id": evt_id, "decision": "invalid_decision_type"},
+    )
+    assert bad_res.status_code == 400
 
 
 

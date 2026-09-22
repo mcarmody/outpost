@@ -39,6 +39,7 @@ BASE_DIR = Path(__file__).resolve().parent
 SNAPSHOTS_DIR = BASE_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_HTML = BASE_DIR / "index.html"
+REVIEW_HTML = BASE_DIR / "review.html"
 
 RETENTION_INTERVAL_SECONDS = 900.0  # 15 min
 RETENTION_MAX_AGE_HOURS = 24.0
@@ -107,6 +108,14 @@ async def root_dashboard():
     if INDEX_HTML.exists():
         return FileResponse(str(INDEX_HTML))
     return {"message": "Project Outpost Telemetry Bus Online"}
+
+
+@app.get("/review", response_class=FileResponse)
+async def review_dashboard():
+    """Serves the human reinforcement and active learning review page."""
+    if REVIEW_HTML.exists():
+        return FileResponse(str(REVIEW_HTML))
+    return {"message": "Outpost Review Dashboard Online"}
 
 
 class DetectionEvent(BaseModel):
@@ -1113,6 +1122,151 @@ async def sse_events(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+class ReviewSubmission(BaseModel):
+    event_id: str
+    decision: str  # accept, reject, relabel
+    confirmed_species: Optional[str] = None
+    notes: Optional[str] = None
+    reviewer: str = "Mike"
+    stream_id: Optional[str] = None
+    proposed_species: Optional[str] = None
+    confidence: Optional[float] = None
+    snapshot_url: Optional[str] = None
+    bbox: Optional[list] = None
+
+
+@app.get("/api/review/queue")
+async def get_review_candidates(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    min_confidence: float = 0.0,
+    max_confidence: float = 1.0,
+):
+    """Retrieve candidate detection events waiting for human reinforcement review."""
+    candidates = db.get_review_queue(
+        limit=limit,
+        stream_id=stream_id,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
+    )
+    return {
+        "count": len(candidates),
+        "limit": limit,
+        "stream_id": stream_id,
+        "queue": candidates,
+    }
+
+
+@app.post("/api/review/submit", status_code=201)
+async def submit_human_review(review: ReviewSubmission):
+    """Submit human review decision (accept, reject, relabel) with notes for reinforcement."""
+    event_data = db.get_event(review.event_id)
+
+    stream_id = review.stream_id or (event_data.get("stream_id") if event_data else "")
+    proposed_species = review.proposed_species or (event_data.get("species") if event_data else "")
+    confidence = review.confidence if review.confidence is not None else (event_data.get("confidence", 0.0) if event_data else 0.0)
+    snapshot_url = review.snapshot_url or (event_data.get("snapshot_url") if event_data else None)
+    bbox = review.bbox if review.bbox is not None else (event_data.get("bbox") if event_data else [])
+
+    decision = review.decision.lower().strip()
+    if decision not in ["accept", "reject", "relabel"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid decision '{review.decision}'. Must be accept, reject, or relabel.",
+        )
+
+    confirmed = review.confirmed_species
+    if decision == "accept" and not confirmed:
+        confirmed = proposed_species
+
+    rev_id = f"rev_{uuid.uuid4().hex[:8]}"
+    review_record = {
+        "review_id": rev_id,
+        "event_id": review.event_id,
+        "stream_id": stream_id,
+        "proposed_species": proposed_species,
+        "confidence": confidence,
+        "snapshot_url": snapshot_url,
+        "bbox": bbox,
+        "decision": decision,
+        "confirmed_species": confirmed,
+        "notes": review.notes or "",
+        "reviewer": review.reviewer,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    success = db.save_review(review_record)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to persist human review decision.")
+
+    return {
+        "status": "reviewed",
+        "review_id": rev_id,
+        "event_id": review.event_id,
+        "decision": decision,
+        "confirmed_species": confirmed,
+        "reviewer": review.reviewer,
+        "notes": review.notes,
+    }
+
+
+@app.get("/api/review/history")
+async def get_review_history(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    decision: Optional[str] = None,
+    reviewer: Optional[str] = None,
+):
+    """Retrieve historical human reinforcement review records."""
+    reviews = db.query_reviews(
+        limit=limit,
+        stream_id=stream_id,
+        decision=decision,
+        reviewer=reviewer,
+    )
+    return {
+        "count": len(reviews),
+        "limit": limit,
+        "reviews": reviews,
+    }
+
+
+@app.get("/api/review/stats")
+async def get_review_telemetry():
+    """Retrieve summary metrics and queue depth for human reinforcement reviews."""
+    return db.get_review_stats()
+
+
+@app.get("/api/review/export")
+async def export_review_dataset(
+    format: str = "json",
+    decision: str = "accept",
+):
+    """Export verified human review dataset for model fine-tuning."""
+    reviews = db.query_reviews(limit=1000, decision=decision)
+    if format.lower() == "yolo_manifest":
+        manifest = []
+        for r in reviews:
+            manifest.append({
+                "image": r.get("snapshot_url"),
+                "label": r.get("confirmed_species") or r.get("proposed_species"),
+                "bbox": r.get("bbox"),
+                "reviewer": r.get("reviewer"),
+                "notes": r.get("notes"),
+            })
+        return {
+            "format": "yolo_manifest",
+            "count": len(manifest),
+            "manifest": manifest,
+        }
+
+    return {
+        "format": "json",
+        "count": len(reviews),
+        "dataset": reviews,
+    }
 
 
 if __name__ == "__main__":
