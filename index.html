@@ -1,190 +1,252 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en" class="h-full bg-stone-950 text-stone-100">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Project Outpost — Ops Room</title>
+  <title>Project Outpost — Field Station</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    .font-serif-title {
+      font-family: 'Newsreader', Georgia, Cambria, serif;
+    }
+    .font-mono-nums {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
     @keyframes pulse-border {
-      0%, 100% { border-color: rgb(51, 65, 85); }
-      50% { border-color: rgb(16, 185, 129); }
+      0%, 100% { border-color: rgb(41, 37, 36); }
+      50% { border-color: rgb(245, 158, 11); }
     }
     .detection-flash {
       animation: pulse-border 1.5s ease-in-out;
     }
+    /* Safe-area insets for mobile notched devices */
+    .pb-safe {
+      padding-bottom: env(safe-area-inset-bottom, 0.75rem);
+    }
   </style>
 </head>
-<body class="h-full flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+<body class="h-full flex flex-col font-sans antialiased selection:bg-amber-600 selection:text-white bg-stone-950">
 
-  <!-- Top Navigation / HUD -->
-  <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between z-10">
-    <div class="flex items-center space-x-3">
-      <div class="w-8 h-8 rounded bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-        <i class="fa-solid fa-satellite-dish"></i>
+  <!-- Top Navigation / Field Station HUD -->
+  <header class="h-14 border-b border-stone-800/80 bg-stone-900/90 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10 shrink-0">
+    <div class="flex items-center space-x-2.5 sm:space-x-3">
+      <div class="w-8 h-8 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+        <i class="fa-solid fa-compass text-sm"></i>
       </div>
       <div>
-        <h1 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">Project Outpost <span class="text-xs font-normal text-slate-400">· Ops Room</span></h1>
+        <h1 class="text-sm font-serif-title tracking-wide text-stone-100 font-medium">PROJECT OUTPOST <span class="text-xs font-sans text-stone-400 font-normal hidden xs:inline">· Field Station</span></h1>
       </div>
     </div>
 
-    <!-- Telemetry Stats -->
-    <div class="hidden md:flex items-center space-x-6 text-xs text-slate-400">
-      <div>Streams: <span class="font-mono font-medium text-slate-200" id="stat-streams">3 Active</span></div>
-      <div>Detections: <span class="font-mono font-medium text-slate-200" id="stat-detections">0</span></div>
-      <div>Species Seen: <span class="font-mono font-medium text-slate-200" id="stat-species">0</span></div>
-      <div>Throughput: <span class="font-mono font-medium text-emerald-400" id="stat-fps">~120 FPS (4090)</span></div>
+    <!-- Desktop Telemetry Stats -->
+    <div class="hidden md:flex items-center space-x-6 text-xs text-stone-400">
+      <div>Outposts: <span class="font-mono-nums font-medium text-stone-200" id="stat-streams">3 Active</span></div>
+      <div>Sightings: <span class="font-mono-nums font-medium text-amber-400" id="stat-detections">0</span></div>
+      <div>Species: <span class="font-mono-nums font-medium text-stone-200" id="stat-species">0</span></div>
+      <div>Engine: <span class="font-mono-nums font-medium text-emerald-400" id="stat-fps">~120 FPS (4090)</span></div>
     </div>
 
-    <!-- Connection Status Pill -->
-    <div class="flex items-center space-x-3">
-      <button id="audio-toggle-btn" onclick="toggleWildlifeAudio()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-emerald-400 flex items-center transition" title="Toggle audio alert chime">
+    <!-- Right Controls: Audio + Live Connection Status -->
+    <div class="flex items-center space-x-2 sm:space-x-3">
+      <button id="audio-toggle-btn" onclick="toggleWildlifeAudio()" class="px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-xs text-emerald-400 flex items-center transition min-h-[36px]" title="Toggle audio alert chime">
         <i class="fa-solid fa-bell"></i>
-        <span class="ml-1 hidden sm:inline">Alerts: ON</span>
+        <span class="ml-1.5 hidden sm:inline">Alerts: ON</span>
       </button>
-      <div class="flex items-center space-x-2 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs">
+      <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-800/90 border border-stone-700/80 text-xs min-h-[36px]">
         <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="status-indicator"></span>
-        <span class="font-mono text-slate-300" id="status-text">Connecting...</span>
+        <span class="font-mono-nums text-[11px] text-stone-300" id="status-text">Connecting...</span>
       </div>
     </div>
   </header>
 
   <!-- Slide-Down High-Priority Alert Banner -->
-  <div id="alert-banner" class="hidden bg-rose-950/90 border-b border-rose-500/60 px-4 py-2 flex items-center justify-between z-20 backdrop-blur shadow-lg">
-    <div class="flex items-center space-x-2 text-rose-200 text-xs font-semibold">
-      <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-      <span id="alert-banner-text">TARGET ALERT: High-priority species detected</span>
+  <div id="alert-banner" class="hidden bg-amber-950/90 border-b border-amber-500/60 px-4 py-2 flex items-center justify-between z-20 backdrop-blur shadow-lg shrink-0">
+    <div class="flex items-center space-x-2 text-amber-200 text-xs font-semibold">
+      <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+      <span id="alert-banner-text">TARGET ALERT: High-priority species sighted</span>
     </div>
-    <button onclick="dismissAlertBanner()" class="text-rose-400 hover:text-white text-xs p-1">
+    <button onclick="dismissAlertBanner()" class="text-amber-400 hover:text-white text-xs p-1">
       <i class="fa-solid fa-xmark"></i>
     </button>
   </div>
 
-  <!-- Main Viewport -->
-  <main class="flex-1 flex overflow-hidden">
+  <!-- Mobile Segmented View Navigation Pill (< md) -->
+  <nav class="md:hidden border-b border-stone-800/80 bg-stone-900/60 px-3 py-2 flex items-center justify-center shrink-0">
+    <div class="grid grid-cols-3 w-full max-w-sm bg-stone-950/80 rounded-lg p-1 border border-stone-800 text-xs">
+      <button id="tab-btn-streams" onclick="setMobileTab('streams')" class="py-1.5 px-2 rounded-md font-medium transition text-center flex items-center justify-center space-x-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+        <i class="fa-solid fa-tower-observation text-[11px]"></i>
+        <span>Outposts</span>
+      </button>
+      <button id="tab-btn-sightings" onclick="setMobileTab('sightings')" class="py-1.5 px-2 rounded-md font-medium transition text-center flex items-center justify-center space-x-1.5 text-stone-400 hover:text-stone-200">
+        <i class="fa-solid fa-book-open text-[11px]"></i>
+        <span>Field Log</span>
+      </button>
+      <button id="tab-btn-station" onclick="setMobileTab('station')" class="py-1.5 px-2 rounded-md font-medium transition text-center flex items-center justify-center space-x-1.5 text-stone-400 hover:text-stone-200">
+        <i class="fa-solid fa-sliders text-[11px]"></i>
+        <span>Station</span>
+      </button>
+    </div>
+  </nav>
 
-    <!-- Left: Surveillance Multi-Stream Grid -->
-    <section class="flex-1 p-4 overflow-y-auto">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full">
+  <!-- Main Viewport Shell -->
+  <main class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+
+    <!-- View 1: Observation Posts / Streams Grid -->
+    <section id="streams-section" class="flex-1 p-3 sm:p-4 overflow-y-auto w-full">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-7xl mx-auto">
 
         <!-- Stream 1: Anacapa Kelp Forest -->
-        <div id="tile-anacapa_kelp_01" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
-          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+        <article id="tile-anacapa_kelp_01" class="stream-tile flex flex-col rounded-xl border border-stone-800/80 bg-stone-900/60 overflow-hidden relative shadow-md">
+          <div class="p-3 border-b border-stone-800/80 bg-stone-950/50 flex items-center justify-between text-xs">
             <div class="flex items-center space-x-2">
               <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span class="font-medium text-slate-200">Anacapa Island Kelp Forest</span>
-              <span class="text-slate-500">· Explore.org</span>
+              <h2 class="font-serif-title font-medium text-stone-200 text-sm tracking-wide">Anacapa Island Kelp Forest</h2>
+              <span class="text-stone-500 text-[11px] hidden sm:inline">· Channel Islands</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-slate-400 font-mono text-[11px]" id="anacapa_kelp_01-last-seen">No detections yet</span>
-              <button id="anacapa_kelp_01-mode-btn" onclick="toggleStreamMode('anacapa_kelp_01')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+              <span class="text-stone-400 font-mono-nums text-[11px]" id="anacapa_kelp_01-last-seen">No sightings yet</span>
+              <button id="anacapa_kelp_01-mode-btn" onclick="toggleStreamMode('anacapa_kelp_01')" class="px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 border border-stone-700/80 text-[11px] font-medium flex items-center space-x-1.5 transition min-h-[30px]">
+                <i class="fa-solid fa-video text-[10px]"></i>
+                <span>Watch Live</span>
+              </button>
             </div>
           </div>
-          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+          <div class="w-full aspect-video bg-stone-950 flex items-center justify-center relative overflow-hidden group">
             <iframe id="anacapa_kelp_01-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
             <img id="anacapa_kelp_01-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
-            <div id="anacapa_kelp_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
-              <i class="fa-solid fa-water text-3xl"></i>
-              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            <div id="anacapa_kelp_01-placeholder" class="text-stone-600 flex flex-col items-center space-y-2 z-0">
+              <i class="fa-solid fa-water text-3xl text-stone-700"></i>
+              <span class="text-xs">Awaiting live CUDA inference frame</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-cyan-300 hidden z-10" id="anacapa_kelp_01-tag">
+            <div class="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded bg-black/80 backdrop-blur text-[11px] font-mono-nums text-amber-300 hidden z-10 border border-amber-500/30" id="anacapa_kelp_01-tag">
               <span id="anacapa_kelp_01-label"></span>
             </div>
           </div>
-        </div>
+        </article>
 
         <!-- Stream 2: Cornell FeederWatch -->
-        <div id="tile-cornell_feeder_01" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
-          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+        <article id="tile-cornell_feeder_01" class="stream-tile flex flex-col rounded-xl border border-stone-800/80 bg-stone-900/60 overflow-hidden relative shadow-md">
+          <div class="p-3 border-b border-stone-800/80 bg-stone-950/50 flex items-center justify-between text-xs">
             <div class="flex items-center space-x-2">
               <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span class="font-medium text-slate-200">Cornell Lab FeederWatch</span>
-              <span class="text-slate-500">· Cornell Lab</span>
+              <h2 class="font-serif-title font-medium text-stone-200 text-sm tracking-wide">Cornell Lab FeederWatch</h2>
+              <span class="text-stone-500 text-[11px] hidden sm:inline">· Ithaca, NY</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-slate-400 font-mono text-[11px]" id="cornell_feeder_01-last-seen">No detections yet</span>
-              <button id="cornell_feeder_01-mode-btn" onclick="toggleStreamMode('cornell_feeder_01')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+              <span class="text-stone-400 font-mono-nums text-[11px]" id="cornell_feeder_01-last-seen">No sightings yet</span>
+              <button id="cornell_feeder_01-mode-btn" onclick="toggleStreamMode('cornell_feeder_01')" class="px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 border border-stone-700/80 text-[11px] font-medium flex items-center space-x-1.5 transition min-h-[30px]">
+                <i class="fa-solid fa-video text-[10px]"></i>
+                <span>Watch Live</span>
+              </button>
             </div>
           </div>
-          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+          <div class="w-full aspect-video bg-stone-950 flex items-center justify-center relative overflow-hidden group">
             <iframe id="cornell_feeder_01-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
             <img id="cornell_feeder_01-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
-            <div id="cornell_feeder_01-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
-              <i class="fa-solid fa-dove text-3xl"></i>
-              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            <div id="cornell_feeder_01-placeholder" class="text-stone-600 flex flex-col items-center space-y-2 z-0">
+              <i class="fa-solid fa-dove text-3xl text-stone-700"></i>
+              <span class="text-xs">Awaiting live CUDA inference frame</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-amber-300 hidden z-10" id="cornell_feeder_01-tag">
+            <div class="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded bg-black/80 backdrop-blur text-[11px] font-mono-nums text-amber-300 hidden z-10 border border-amber-500/30" id="cornell_feeder_01-tag">
               <span id="cornell_feeder_01-label"></span>
             </div>
           </div>
-        </div>
+        </article>
 
         <!-- Stream 3: Katmai Brooks Falls -->
-        <div id="tile-katmai_brooks_falls" class="stream-tile flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden relative">
-          <div class="p-2.5 border-b border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-xs">
+        <article id="tile-katmai_brooks_falls" class="stream-tile flex flex-col rounded-xl border border-stone-800/80 bg-stone-900/60 overflow-hidden relative shadow-md">
+          <div class="p-3 border-b border-stone-800/80 bg-stone-950/50 flex items-center justify-between text-xs">
             <div class="flex items-center space-x-2">
               <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span class="font-medium text-slate-200">Katmai Brooks Falls (Bears)</span>
-              <span class="text-slate-500">· Explore.org</span>
+              <h2 class="font-serif-title font-medium text-stone-200 text-sm tracking-wide">Katmai Brooks Falls</h2>
+              <span class="text-stone-500 text-[11px] hidden sm:inline">· Brown Bears</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-slate-400 font-mono text-[11px]" id="katmai_brooks_falls-last-seen">No detections yet</span>
-              <button id="katmai_brooks_falls-mode-btn" onclick="toggleStreamMode('katmai_brooks_falls')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition"><i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span></button>
+              <span class="text-stone-400 font-mono-nums text-[11px]" id="katmai_brooks_falls-last-seen">No sightings yet</span>
+              <button id="katmai_brooks_falls-mode-btn" onclick="toggleStreamMode('katmai_brooks_falls')" class="px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 border border-stone-700/80 text-[11px] font-medium flex items-center space-x-1.5 transition min-h-[30px]">
+                <i class="fa-solid fa-video text-[10px]"></i>
+                <span>Watch Live</span>
+              </button>
             </div>
           </div>
-          <div class="flex-1 flex items-center justify-center bg-slate-950/80 relative overflow-hidden group">
+          <div class="w-full aspect-video bg-stone-950 flex items-center justify-center relative overflow-hidden group">
             <iframe id="katmai_brooks_falls-player" class="w-full h-full hidden z-0" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
             <img id="katmai_brooks_falls-preview" src="" class="w-full h-full object-cover hidden z-0" alt="Latest Frame">
-            <div id="katmai_brooks_falls-placeholder" class="text-slate-600 flex flex-col items-center space-y-2 z-0">
-              <i class="fa-solid fa-mountain text-3xl"></i>
-              <span class="text-xs">Awaiting live CUDA inference stream</span>
+            <div id="katmai_brooks_falls-placeholder" class="text-stone-600 flex flex-col items-center space-y-2 z-0">
+              <i class="fa-solid fa-mountain text-3xl text-stone-700"></i>
+              <span class="text-xs">Awaiting live CUDA inference frame</span>
             </div>
-            <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur text-[11px] font-mono text-emerald-300 hidden z-10" id="katmai_brooks_falls-tag">
+            <div class="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded bg-black/80 backdrop-blur text-[11px] font-mono-nums text-amber-300 hidden z-10 border border-amber-500/30" id="katmai_brooks_falls-tag">
               <span id="katmai_brooks_falls-label"></span>
             </div>
           </div>
-        </div>
+        </article>
 
-        <!-- Stream 4: Control / Target Species Watcher -->
-        <div class="flex flex-col rounded-lg border border-slate-800 bg-slate-900/60 p-4 justify-between">
+        <!-- Station / Field Config (Inlined on Desktop Grid, or rendered in Tab on mobile) -->
+        <article id="station-card" class="flex flex-col rounded-xl border border-stone-800/80 bg-stone-900/60 p-4 justify-between shadow-md">
           <div>
-            <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">Species Watcher & Alert Target</h2>
-            <p class="text-xs text-slate-400 mb-4">Choose priority target species to highlight when sighted across any live feed.</p>
+            <div class="flex items-center space-x-2 mb-2">
+              <i class="fa-solid fa-sliders text-amber-400 text-xs"></i>
+              <h3 class="text-xs font-serif-title tracking-wider text-stone-200 uppercase font-semibold">Priority Species & Watchlist</h3>
+            </div>
+            <p class="text-xs text-stone-400 mb-4 leading-relaxed">Filter telemetry and elevate audio alerts when focal wildlife is identified across any observation post.</p>
 
-            <label class="block text-[11px] font-medium text-slate-400 mb-1">Target Priority Species:</label>
-            <select id="target-species-select" class="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
-              <option value="ALL">All Species (No Filter)</option>
+            <label for="target-species-select" class="block text-[11px] font-medium text-stone-400 mb-1.5">Focal Species Target:</label>
+            <select id="target-species-select" class="w-full bg-stone-950 border border-stone-800 rounded-lg px-3 py-2 text-xs text-stone-200 focus:outline-none focus:border-amber-500 transition">
+              <option value="ALL">All Species (Broad Field Scan)</option>
               <option value="Garibaldi">Garibaldi (California State Marine Fish)</option>
-              <option value="Brown Bear">Brown Bear</option>
-              <option value="Bald Eagle">Bald Eagle</option>
+              <option value="Brown Bear">Brown Bear (Ursus arctos)</option>
+              <option value="Bald Eagle">Bald Eagle (Haliaeetus leucocephalus)</option>
               <option value="Northern Cardinal">Northern Cardinal</option>
               <option value="Giant Kelp Bass">Giant Kelp Bass</option>
             </select>
           </div>
 
-          <div class="pt-4 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
-            <span id="hardware-status">Hardware: checking...</span>
-            <span class="text-indigo-400 font-mono">SSE Bus: :8000/events</span>
+          <div class="pt-4 mt-4 border-t border-stone-800 text-[11px] text-stone-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <span id="hardware-status" class="text-stone-400">Hardware: checking...</span>
+            <span class="text-amber-400/90 font-mono-nums text-[10px]">SSE Bus: :8000/events</span>
           </div>
-        </div>
+        </article>
 
       </div>
     </section>
 
-    <!-- Right: Real-Time Event Ticker Feed -->
-    <aside class="w-80 border-l border-slate-800 bg-slate-900/40 flex flex-col">
-      <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-        <h2 class="text-xs font-semibold tracking-wide text-slate-300 uppercase">Live Telemetry Feed</h2>
-        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">SSE</span>
+    <!-- View 2: Field Log (Ticker Feed) — Sidebar on Desktop, Full View on Mobile -->
+    <aside id="sightings-section" class="hidden md:flex w-full md:w-80 lg:w-96 border-t md:border-t-0 md:border-l border-stone-800/80 bg-stone-900/40 flex-col shrink-0 h-full overflow-hidden">
+      <div class="p-3 border-b border-stone-800/80 flex items-center justify-between bg-stone-950/60 shrink-0">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-book-open text-amber-400 text-xs"></i>
+          <h2 class="text-xs font-serif-title font-medium tracking-wide text-stone-200 uppercase">Live Field Journal</h2>
+        </div>
+        <span class="text-[10px] font-mono-nums px-2 py-0.5 rounded bg-stone-800 text-stone-400 border border-stone-700/60">SSE STREAM</span>
       </div>
 
-      <div id="event-feed" class="flex-1 p-2 space-y-2 overflow-y-auto">
-        <!-- Events will dynamically append here -->
+      <div id="event-feed" class="flex-1 p-3 space-y-2.5 overflow-y-auto">
+        <!-- Sightings append here -->
       </div>
     </aside>
 
   </main>
+
+  <!-- Mobile Bottom Tab Bar (< md) -->
+  <footer class="md:hidden border-t border-stone-800/90 bg-stone-900/95 backdrop-blur px-4 py-2 pb-safe flex items-center justify-around z-20 shrink-0">
+    <button onclick="setMobileTab('streams')" id="bbar-btn-streams" class="flex flex-col items-center space-y-1 text-amber-400 transition py-1 px-3">
+      <i class="fa-solid fa-tower-observation text-base"></i>
+      <span class="text-[10px] font-medium tracking-tight">Outposts</span>
+    </button>
+    <button onclick="setMobileTab('sightings')" id="bbar-btn-sightings" class="flex flex-col items-center space-y-1 text-stone-400 hover:text-stone-200 transition py-1 px-3 relative">
+      <i class="fa-solid fa-book-open text-base"></i>
+      <span class="text-[10px] font-medium tracking-tight">Field Log</span>
+      <span id="sighting-badge" class="hidden absolute top-0 right-2 w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+    </button>
+    <button onclick="setMobileTab('station')" id="bbar-btn-station" class="flex flex-col items-center space-y-1 text-stone-400 hover:text-stone-200 transition py-1 px-3">
+      <i class="fa-solid fa-sliders text-base"></i>
+      <span class="text-[10px] font-medium tracking-tight">Station</span>
+    </button>
+  </footer>
 
   <script>
     const statusIndicator = document.getElementById('status-indicator');
@@ -196,6 +258,84 @@
 
     let totalDetections = 0;
     const seenSpecies = new Set();
+    let currentMobileTab = 'streams';
+
+    // Mobile View Navigation Controller
+    function setMobileTab(tab) {
+      currentMobileTab = tab;
+      const streamsSec = document.getElementById('streams-section');
+      const sightingsSec = document.getElementById('sightings-section');
+      const stationCard = document.getElementById('station-card');
+
+      // Update top pill buttons
+      const pillStreams = document.getElementById('tab-btn-streams');
+      const pillSightings = document.getElementById('tab-btn-sightings');
+      const pillStation = document.getElementById('tab-btn-station');
+
+      // Update bottom bar buttons
+      const bbarStreams = document.getElementById('bbar-btn-streams');
+      const bbarSightings = document.getElementById('bbar-btn-sightings');
+      const bbarStation = document.getElementById('bbar-btn-station');
+
+      const activePillClass = 'py-1.5 px-2 rounded-md font-medium transition text-center flex items-center justify-center space-x-1.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm';
+      const inactivePillClass = 'py-1.5 px-2 rounded-md font-medium transition text-center flex items-center justify-center space-x-1.5 text-stone-400 hover:text-stone-200';
+
+      if (pillStreams) pillStreams.className = tab === 'streams' ? activePillClass : inactivePillClass;
+      if (pillSightings) pillSightings.className = tab === 'sightings' ? activePillClass : inactivePillClass;
+      if (pillStation) pillStation.className = tab === 'station' ? activePillClass : inactivePillClass;
+
+      if (bbarStreams) bbarStreams.className = tab === 'streams' ? 'flex flex-col items-center space-y-1 text-amber-400 transition py-1 px-3' : 'flex flex-col items-center space-y-1 text-stone-400 hover:text-stone-200 transition py-1 px-3';
+      if (bbarSightings) bbarSightings.className = tab === 'sightings' ? 'flex flex-col items-center space-y-1 text-amber-400 transition py-1 px-3 relative' : 'flex flex-col items-center space-y-1 text-stone-400 hover:text-stone-200 transition py-1 px-3 relative';
+      if (bbarStation) bbarStation.className = tab === 'station' ? 'flex flex-col items-center space-y-1 text-amber-400 transition py-1 px-3' : 'flex flex-col items-center space-y-1 text-stone-400 hover:text-stone-200 transition py-1 px-3';
+
+      if (window.innerWidth < 768) {
+        if (tab === 'streams') {
+          streamsSec.classList.remove('hidden');
+          sightingsSec.classList.add('hidden');
+          sightingsSec.classList.remove('flex');
+          // Show camera cards, hide station config card on streams tab
+          stationCard.classList.add('hidden');
+          document.querySelectorAll('.stream-tile').forEach(el => el.classList.remove('hidden'));
+        } else if (tab === 'sightings') {
+          streamsSec.classList.add('hidden');
+          sightingsSec.classList.remove('hidden');
+          sightingsSec.classList.add('flex');
+          // Clear notification dot
+          const badge = document.getElementById('sighting-badge');
+          if (badge) badge.classList.add('hidden');
+        } else if (tab === 'station') {
+          streamsSec.classList.remove('hidden');
+          sightingsSec.classList.add('hidden');
+          sightingsSec.classList.remove('flex');
+          // Show only station config card, hide camera stream cards
+          stationCard.classList.remove('hidden');
+          document.querySelectorAll('.stream-tile').forEach(el => el.classList.add('hidden'));
+        }
+      } else {
+        // Desktop: always show streams and sightings side-by-side
+        streamsSec.classList.remove('hidden');
+        sightingsSec.classList.remove('hidden');
+        sightingsSec.classList.add('flex');
+        stationCard.classList.remove('hidden');
+        document.querySelectorAll('.stream-tile').forEach(el => el.classList.remove('hidden'));
+      }
+    }
+
+    // Window resize handler to restore desktop layout seamlessly
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 768) {
+        const streamsSec = document.getElementById('streams-section');
+        const sightingsSec = document.getElementById('sightings-section');
+        const stationCard = document.getElementById('station-card');
+        streamsSec.classList.remove('hidden');
+        sightingsSec.classList.remove('hidden');
+        sightingsSec.classList.add('flex');
+        if (stationCard) stationCard.classList.remove('hidden');
+        document.querySelectorAll('.stream-tile').forEach(el => el.classList.remove('hidden'));
+      } else {
+        setMobileTab(currentMobileTab);
+      }
+    });
 
     // Stream live embed player state
     const streamEmbedUrls = {
@@ -230,8 +370,8 @@
         if (preview) preview.classList.add('hidden');
         if (placeholder) placeholder.classList.add('hidden');
         if (btn) {
-          btn.innerHTML = '<i class="fa-solid fa-camera text-[9px]"></i><span>CV Feed</span>';
-          btn.className = 'px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] flex items-center space-x-1 border border-indigo-500 transition shadow-sm';
+          btn.innerHTML = '<i class="fa-solid fa-camera text-[10px]"></i><span>Field Snapshot</span>';
+          btn.className = 'px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-[11px] flex items-center space-x-1.5 transition shadow-sm min-h-[30px]';
         }
       } else {
         streamMode[streamId] = 'preview';
@@ -244,8 +384,8 @@
           placeholder.classList.remove('hidden');
         }
         if (btn) {
-          btn.innerHTML = '<i class="fa-solid fa-video text-[9px]"></i><span>Watch Live</span>';
-          btn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/60 text-[10px] flex items-center space-x-1 transition';
+          btn.innerHTML = '<i class="fa-solid fa-video text-[10px]"></i><span>Watch Live</span>';
+          btn.className = 'px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 border border-stone-700/80 text-[11px] font-medium flex items-center space-x-1.5 transition min-h-[30px]';
         }
       }
     }
@@ -276,7 +416,7 @@
 
     evtSource.addEventListener('connected', (e) => {
       statusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500';
-      statusText.textContent = 'Online · SSE Hot';
+      statusText.textContent = 'Live · Field SSE Hot';
     });
 
     evtSource.addEventListener('detection', (e) => {
@@ -292,8 +432,14 @@
     function handleDetection(evt, isBackfill = false) {
       totalDetections++;
       seenSpecies.add(evt.species);
-      statDetections.textContent = totalDetections;
-      statSpecies.textContent = seenSpecies.size;
+      if (statDetections) statDetections.textContent = totalDetections;
+      if (statSpecies) statSpecies.textContent = seenSpecies.size;
+
+      // Pulse Sighting Badge on Mobile if user is on another tab
+      if (currentMobileTab !== 'sightings' && window.innerWidth < 768) {
+        const badge = document.getElementById('sighting-badge');
+        if (badge) badge.classList.remove('hidden');
+      }
 
       // Update Stream Tile
       const tile = document.getElementById(`tile-${evt.stream_id}`);
@@ -333,39 +479,40 @@
 
       // Trigger high-visibility alert banner and audio chime if alert rule matched
       if (!isBackfill && evt.metadata && evt.metadata.alert_triggered) {
-        showAlertBanner(`🚨 TARGET SPECIES ALERT: ${evt.species} sighted on ${evt.stream_id} (${Math.round(evt.confidence * 100)}% confidence)!`);
+        showAlertBanner(`🚨 TARGET SPECIES SIGHTING: ${evt.species} identified on ${evt.stream_id} (${Math.round(evt.confidence * 100)}% confidence)!`);
         playWildlifeChime();
       }
 
       // Check target filter
-      const filter = targetSelect.value;
+      const filter = targetSelect ? targetSelect.value : 'ALL';
       const isTarget = (filter !== 'ALL' && filter === evt.species);
 
-      // Append to Ticker Feed
+      // Append to Field Log (Ticker Feed)
       const card = document.createElement('div');
-      card.className = `p-2.5 rounded border text-xs transition-all ${
+      card.className = `p-3 rounded-xl border text-xs transition-all shadow-sm ${
         isTarget
-          ? 'bg-indigo-950/40 border-indigo-500 text-indigo-100 shadow-lg shadow-indigo-950/50'
-          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-200'
+          ? 'bg-amber-950/40 border-amber-500 text-amber-100 shadow-md shadow-amber-950/60'
+          : 'bg-stone-900/80 border-stone-800 hover:border-stone-700 text-stone-200'
       }`;
 
       const timeStr = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
       card.innerHTML = `
         <div class="flex items-center justify-between mb-1">
-          <span class="font-semibold text-slate-100">${evt.species}</span>
-          <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">${Math.round(evt.confidence * 100)}%</span>
+          <span class="font-serif-title text-sm font-semibold text-stone-100">${evt.species}</span>
+          <span class="font-mono-nums text-[10px] px-2 py-0.5 rounded bg-stone-800 text-amber-400 font-bold border border-stone-700/60">${Math.round(evt.confidence * 100)}%</span>
         </div>
-        <div class="text-[11px] text-slate-400 flex items-center justify-between">
-          <span class="truncate max-w-[140px]">${evt.stream_id}</span>
-          <span class="font-mono text-[10px] text-slate-500">${timeStr}</span>
+        <div class="text-[11px] text-stone-400 flex items-center justify-between">
+          <span class="truncate max-w-[150px] font-medium text-stone-300">${evt.stream_id}</span>
+          <span class="font-mono-nums text-[10px] text-stone-500">${timeStr}</span>
         </div>
       `;
 
-      eventFeed.insertBefore(card, eventFeed.firstChild);
-
-      // Keep max 40 items in DOM
-      if (eventFeed.children.length > 40) {
-        eventFeed.removeChild(eventFeed.lastChild);
+      if (eventFeed) {
+        eventFeed.insertBefore(card, eventFeed.firstChild);
+        // Keep max 40 items in DOM
+        if (eventFeed.children.length > 40) {
+          eventFeed.removeChild(eventFeed.lastChild);
+        }
       }
     }
 
@@ -386,17 +533,12 @@
       }
     }
 
-    // Unconditional immediate invocation + load listener fallbacks
     backfillRecentEvents();
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', backfillRecentEvents);
     }
     window.addEventListener('load', backfillRecentEvents);
 
-    // Real hardware status — was previously a hardcoded "NVIDIA RTX 4090"
-    // string shown regardless of whether anything was actually running.
-    // /api/supervisor now reports the active edge runner's real hardware
-    // (or says plainly that none is currently reporting in).
     async function loadHardwareStatus() {
       const el = document.getElementById('hardware-status');
       const fpsEl = document.getElementById('stat-fps');
@@ -428,11 +570,11 @@
       audioAlertEnabled = !audioAlertEnabled;
       const btn = document.getElementById('audio-toggle-btn');
       if (audioAlertEnabled) {
-        btn.innerHTML = '<i class="fa-solid fa-bell"></i><span class="ml-1 hidden sm:inline">Alerts: ON</span>';
-        btn.className = 'px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-emerald-400 flex items-center transition';
+        btn.innerHTML = '<i class="fa-solid fa-bell"></i><span class="ml-1.5 hidden sm:inline">Alerts: ON</span>';
+        btn.className = 'px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-xs text-emerald-400 flex items-center transition min-h-[36px]';
       } else {
-        btn.innerHTML = '<i class="fa-solid fa-bell-slash"></i><span class="ml-1 hidden sm:inline">Alerts: OFF</span>';
-        btn.className = 'px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-500 flex items-center transition';
+        btn.innerHTML = '<i class="fa-solid fa-bell-slash"></i><span class="ml-1.5 hidden sm:inline">Alerts: OFF</span>';
+        btn.className = 'px-2.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-xs text-stone-500 flex items-center transition min-h-[36px]';
       }
     }
 
@@ -467,6 +609,9 @@
       const banner = document.getElementById('alert-banner');
       if (banner) banner.classList.add('hidden');
     }
+
+    // Initialize mobile view tab on boot
+    setMobileTab('streams');
   </script>
 </body>
 </html>
