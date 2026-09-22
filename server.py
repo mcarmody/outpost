@@ -420,10 +420,29 @@ async def prometheus_metrics():
 
 
 @app.get("/events/recent", response_model=List[DetectionEvent])
-async def get_recent_events(limit: int = 50):
-    """Retrieve recent detection events from the ring buffer."""
+async def get_recent_events(
+    limit: int = 50,
+    stream_id: Optional[str] = None,
+    species: Optional[str] = None,
+):
+    """Retrieve recent detection events from the ring buffer with optional stream and species filtering."""
     events = list(recent_events)
+    if stream_id:
+        target_id = resolve_stream_id(stream_id)
+        events = [e for e in events if e.stream_id == target_id]
+    if species:
+        sp_norm = species.strip().lower().replace("_", " ")
+        events = [e for e in events if e.species.strip().lower().replace("_", " ") == sp_norm]
     return events[-limit:]
+
+
+@app.get("/api/events/{event_id}", response_model=DetectionEvent)
+async def get_event_by_id(event_id: str):
+    """Retrieve a specific detection event from the ring buffer by ID."""
+    for e in reversed(recent_events):
+        if e.event_id == event_id:
+            return e
+    raise HTTPException(status_code=404, detail=f"Event '{event_id}' not found in active telemetry buffer.")
 
 
 @app.get("/api/streams")
@@ -468,9 +487,17 @@ async def get_stream_embed(stream_id: str):
 
 
 @app.get("/api/stats/species")
-async def get_species_stats():
-    """Retrieve species detection counts, peak confidence, and recency."""
-    return sorted(species_stats.values(), key=lambda x: x["count"], reverse=True)
+async def get_species_stats(stream_id: Optional[str] = None):
+    """Retrieve species detection counts, peak confidence, and recency, optionally filtered by stream."""
+    if not stream_id:
+        return sorted(species_stats.values(), key=lambda x: x["count"], reverse=True)
+
+    target_id = resolve_stream_id(stream_id)
+    filtered = []
+    for sp, data in species_stats.items():
+        if target_id in data.get("streams", []):
+            filtered.append(data)
+    return sorted(filtered, key=lambda x: x["count"], reverse=True)
 
 
 @app.get("/api/alerts")

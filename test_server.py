@@ -568,6 +568,121 @@ def test_stream_allowlist_alias_resolution_and_simulation():
     assert any("boat" in s.lower() or "vessel" in s.lower() for s in anacapa_species)
 
 
+def test_events_recent_filtering():
+    """Verify /events/recent filters by stream_id and species."""
+    client = TestClient(app)
+    # Ingest event 1 (allowed on anacapa)
+    client.post("/api/events", json={
+        "event_id": "evt_filter_01",
+        "stream_id": "anacapa_kelp_01",
+        "species": "boat",
+        "confidence": 0.91,
+        "bbox": [10, 20, 30, 40],
+    })
+    # Ingest event 2 (allowed on cornell)
+    client.post("/api/events", json={
+        "event_id": "evt_filter_02",
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.85,
+        "bbox": [15, 25, 35, 45],
+    })
+    # Ingest event 3 (allowed on anacapa)
+    client.post("/api/events", json={
+        "event_id": "evt_filter_03",
+        "stream_id": "anacapa_kelp_01",
+        "species": "person",
+        "confidence": 0.95,
+        "bbox": [50, 60, 70, 80],
+    })
+
+    # All events
+    res_all = client.get("/events/recent")
+    assert res_all.status_code == 200
+    assert len(res_all.json()) == 3
+
+    # Filter by stream_id
+    res_anacapa = client.get("/events/recent?stream_id=anacapa_kelp_01")
+    assert res_anacapa.status_code == 200
+    assert len(res_anacapa.json()) == 2
+    assert all(e["stream_id"] == "anacapa_kelp_01" for e in res_anacapa.json())
+
+    # Filter by species
+    res_species = client.get("/events/recent?species=blue_jay")
+    assert res_species.status_code == 200
+    assert len(res_species.json()) == 1
+    assert res_species.json()[0]["species"] == "blue_jay"
+
+
+def test_get_event_by_id():
+    """Verify GET /api/events/{event_id} retrieves event or returns 404."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "event_id": "evt_lookup_123",
+        "stream_id": "anacapa_kelp_01",
+        "species": "person",
+        "confidence": 0.88,
+        "bbox": [10, 20, 30, 40],
+    })
+
+    # Lookup existing
+    res_ok = client.get("/api/events/evt_lookup_123")
+    assert res_ok.status_code == 200
+    assert res_ok.json()["event_id"] == "evt_lookup_123"
+    assert res_ok.json()["species"] == "person"
+
+    # Lookup nonexistent
+    res_404 = client.get("/api/events/evt_nonexistent_999")
+    assert res_404.status_code == 404
+    assert "not found" in res_404.json()["detail"].lower()
+
+
+def test_species_stats_stream_filtering():
+    """Verify /api/stats/species filters stats by stream_id."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "event_id": "evt_stat_01",
+        "stream_id": "anacapa_kelp_01",
+        "species": "person",
+        "confidence": 0.88,
+        "bbox": [10, 20, 30, 40],
+    })
+    client.post("/api/events", json={
+        "event_id": "evt_stat_02",
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.90,
+        "bbox": [10, 20, 30, 40],
+    })
+
+    # Unfiltered
+    res_all = client.get("/api/stats/species")
+    assert res_all.status_code == 200
+    assert len(res_all.json()) == 2
+
+    # Filtered by stream
+    res_anacapa = client.get("/api/stats/species?stream_id=anacapa_kelp_01")
+    assert res_anacapa.status_code == 200
+    assert len(res_anacapa.json()) == 1
+    assert res_anacapa.json()[0]["species"] == "person"
+
+
+def test_index_html_lightbox_and_quick_filters():
+    """Verify index.html contains lightbox modal, stream filters, and dynamic select support."""
+    client = TestClient(app)
+    res = client.get("/")
+    assert res.status_code == 200
+    html = res.text
+
+    assert "snapshot-modal" in html
+    assert "feed-filter-all" in html
+    assert "feed-filter-anacapa" in html
+    assert "openEventModal" in html
+    assert "openStreamSnapshotModal" in html
+    assert "ensureSpeciesInDropdown" in html
+
+
+
 
 
 
