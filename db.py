@@ -30,21 +30,24 @@ def get_db_path(db_path: Optional[Union[Path, str]] = None) -> Path:
 
 
 def get_db_connection(db_path: Optional[Union[Path, str]] = None) -> sqlite3.Connection:
-    """Create and configure a SQLite connection with WAL mode and row factory."""
+    """Create and configure a SQLite connection with row factory and busy timeouts."""
     resolved_path = get_db_path(db_path)
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(resolved_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
+    if "/tmp" in str(resolved_path) or "test" in str(resolved_path):
+        conn.execute("PRAGMA synchronous = OFF;")
+    else:
+        conn.execute("PRAGMA synchronous = NORMAL;")
     conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
 def init_db(db_path: Optional[Union[Path, str]] = None) -> None:
-    """Initialize SQLite tables and indexes for Outpost detection events."""
+    """Initialize SQLite tables, WAL journal mode, and indexes for Outpost detection events."""
     conn = get_db_connection(db_path)
     try:
+        conn.execute("PRAGMA journal_mode = WAL;")
         with conn:
             conn.execute(
                 """

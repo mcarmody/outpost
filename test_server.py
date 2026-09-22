@@ -1135,6 +1135,120 @@ def test_index_html_sessions_invariants():
     assert "/api/sessions/active" in html
 
 
+def test_temporal_persistence_filter_engine():
+    """Verify sliding-window hysteresis tracking and false-positive suppression."""
+    from temporal_filter import TemporalPersistenceFilter
+
+    filt = TemporalPersistenceFilter(
+        min_hits=3,
+        confidence_threshold=0.70,
+        decay_timeout_seconds=2.0,
+        bypass=False,
+    )
+
+    t0 = 1000.0
+    evt1 = {"stream_id": "anacapa_kelp_01", "species": "person", "confidence": 0.85, "bbox": [10, 10, 50, 50]}
+
+    # Hit 1: Transient candidate under evaluation
+    ok, meta = filt.evaluate(evt1, timestamp=t0)
+    assert ok is False
+    assert meta["status"] == "evaluating"
+    assert meta["hits"] == 1
+    assert meta["required"] == 3
+
+    # Low confidence hit (< 0.70)
+    ok_low, meta_low = filt.evaluate({"stream_id": "anacapa_kelp_01", "species": "person", "confidence": 0.55}, timestamp=t0 + 0.1)
+    assert ok_low is False
+    assert meta_low["status"] == "filtered_low_confidence"
+
+    # Hit 2: Still evaluating
+    ok, meta = filt.evaluate(evt1, timestamp=t0 + 0.5)
+    assert ok is False
+    assert meta["status"] == "evaluating"
+    assert meta["hits"] == 2
+
+    # Hit 3: Reaches threshold -> Confirmed sighting!
+    ok, meta = filt.evaluate(evt1, timestamp=t0 + 1.0)
+    assert ok is True
+    assert meta["status"] == "confirmed"
+    assert meta["hits"] == 3
+    assert meta["confirmed"] is True
+
+    # Hit 4: Sustained confirmed sighting
+    ok, meta = filt.evaluate(evt1, timestamp=t0 + 1.5)
+    assert ok is True
+    assert meta["status"] == "sustained"
+    assert meta["hits"] == 4
+
+    # Temporal decay timeout (> 2.0s lapse)
+    ok, meta = filt.evaluate(evt1, timestamp=t0 + 5.0)
+    assert ok is False
+    assert meta["status"] == "evaluating"
+    assert meta["hits"] == 1
+
+
+def test_api_temporal_filter_endpoints():
+    """Verify /api/filter/temporal endpoints and live server-side ingestion filtering."""
+    client = TestClient(app)
+
+    # 1. Query initial metrics
+    resp = client.get("/api/filter/temporal")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_evaluated" in data
+    assert "active_candidate_tracks" in data
+    assert "config" in data
+
+    # 2. Configure min_hits = 3
+    cfg_resp = client.post("/api/filter/temporal/configure", json={"min_hits": 3, "confidence_threshold": 0.75})
+    assert cfg_resp.status_code == 200
+    assert cfg_resp.json()["config"]["min_hits"] == 3
+
+    # Reset metrics
+    client.post("/api/filter/temporal/reset")
+
+    # 3. Post event 1 -> Filtered by temporal persistence
+    evt = {
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.88,
+        "bbox": [20, 20, 100, 100],
+    }
+    r1 = client.post("/api/events", json=evt)
+    assert r1.status_code == 200
+    assert r1.json()["status"] == "filtered"
+    assert "temporal_persistence" in r1.json()["reason"]
+
+    # Post event 2 -> Filtered
+    r2 = client.post("/api/events", json=evt)
+    assert r2.status_code == 200
+    assert r2.json()["status"] == "filtered"
+
+    # Post event 3 -> Confirmed & broadcasted!
+    r3 = client.post("/api/events", json=evt)
+    assert r3.status_code == 201
+    assert r3.json()["status"] == "broadcasted"
+    assert r3.json()["event"]["metadata"]["temporal_filter"]["status"] == "confirmed"
+
+    # 4. Restore default min_hits = 1 for subsequent tests
+    client.post("/api/filter/temporal/configure", json={"min_hits": 1, "confidence_threshold": 0.70})
+
+
+def test_index_html_temporal_filter_invariants():
+    """Verify index.html contains Temporal Persistence Filter HUD and telemetry polling."""
+    from server import INDEX_HTML
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert "Temporal Persistence Hysteresis" in html
+    assert "stat-temporal-status" in html
+    assert "stat-temporal-confirmed" in html
+    assert "stat-temporal-suppressed" in html
+    assert "stat-temporal-hits" in html
+    assert "loadTemporalFilterTelemetry" in html
+    assert "/api/filter/temporal" in html
+
+
+
 
 
 

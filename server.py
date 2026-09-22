@@ -299,8 +299,15 @@ stream_watchdog.register_stream("katmai_brooks_01", "https://www.youtube.com/wat
 stream_watchdog.register_stream("katmai_brooks_falls", "https://www.youtube.com/watch?v=J7ZrIDvqlic", "Explore.org")
 
 from session_tracker import SightingSessionTracker
+from temporal_filter import TemporalPersistenceFilter
 
 session_tracker = SightingSessionTracker(gap_threshold_seconds=60.0)
+temporal_filter = TemporalPersistenceFilter(
+    min_hits=1,
+    confidence_threshold=0.70,
+    decay_timeout_seconds=3.0,
+    bypass=False,
+)
 
 # In-memory ring buffer of recent events (depth: 200)
 recent_events: deque = deque(maxlen=200)
@@ -415,6 +422,13 @@ async def health_check():
         "total_events_dispatched": total_events_dispatched,
         "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
         "active_wildlife_sessions": len(session_tracker.get_active_sessions()),
+        "temporal_filter": {
+            "min_hits": temporal_filter.min_hits,
+            "active_candidates": len(temporal_filter._tracks),
+            "total_confirmed": temporal_filter.total_confirmed,
+            "total_suppressed_glitches": temporal_filter.total_suppressed_glitches,
+            "bypass": temporal_filter.bypass,
+        },
         "snapshot_storage_mb": snap_stats["total_mb"],
         "snapshot_files_count": snap_stats["total_files"],
         "database": db_stats,
@@ -714,6 +728,39 @@ async def get_stream_embed(stream_id: str):
     }
 
 
+class TemporalFilterConfig(BaseModel):
+    min_hits: Optional[int] = Field(None, ge=1, le=20)
+    confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    decay_timeout_seconds: Optional[float] = Field(None, ge=0.1, le=60.0)
+    bypass: Optional[bool] = None
+
+
+@app.get("/api/filter/temporal")
+async def get_temporal_filter():
+    """Retrieve temporal persistence hysteresis metrics and active candidate tracks."""
+    return temporal_filter.get_metrics()
+
+
+@app.post("/api/filter/temporal/configure")
+async def configure_temporal_filter(config: TemporalFilterConfig):
+    """Dynamically configure temporal persistence hysteresis parameters."""
+    cfg = temporal_filter.configure(
+        min_hits=config.min_hits,
+        confidence_threshold=config.confidence_threshold,
+        decay_timeout_seconds=config.decay_timeout_seconds,
+        bypass=config.bypass,
+    )
+    return {"status": "configured", "config": cfg}
+
+
+@app.post("/api/filter/temporal/reset")
+async def reset_temporal_filter():
+    """Reset temporal persistence candidate tracks and suppression counters."""
+    temporal_filter.reset()
+    return {"status": "reset", "metrics": temporal_filter.get_metrics()}
+
+
+
 
 @app.get("/api/stats/species")
 async def get_species_stats(stream_id: Optional[str] = None):
@@ -782,6 +829,20 @@ def process_event(event: DetectionEvent) -> dict:
             "species": event.species,
             "reason": f"Species '{event.species}' filtered by allowlist for stream '{event.stream_id}'",
         }
+
+    # Temporal persistence & hysteresis filtering (SPEC Section 2.B & Phase 2 Task 2.2)
+    is_confirmed, filter_meta = temporal_filter.evaluate(event.model_dump())
+    if not is_confirmed:
+        return {
+            "status": "filtered",
+            "filtered": True,
+            "event_id": event.event_id,
+            "stream_id": event.stream_id,
+            "species": event.species,
+            "reason": filter_meta.get("reason", "Filtered by temporal persistence"),
+            "filter_metadata": filter_meta,
+        }
+    event.metadata["temporal_filter"] = filter_meta
 
     # Update stream state
     if event.stream_id not in stream_telemetry:
@@ -871,7 +932,12 @@ def process_event(event: DetectionEvent) -> dict:
     for dq in dead_queues:
         subscribers.discard(dq)
 
-    return {"status": "broadcasted", "event_id": event.event_id, "subscribers": len(subscribers)}
+    return {
+        "status": "broadcasted",
+        "event_id": event.event_id,
+        "subscribers": len(subscribers),
+        "event": event.model_dump(),
+    }
 
 
 @app.post("/api/events", status_code=201)

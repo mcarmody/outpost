@@ -242,6 +242,31 @@
                 <div class="text-[10px] text-stone-500 italic text-center py-2">No active lingering wildlife</div>
               </div>
             </div>
+
+            <!-- Temporal Persistence Filter HUD (Hysteresis & Anti-Glitch) -->
+            <div class="mt-4 pt-3 border-t border-stone-800">
+              <div class="flex items-center justify-between text-[11px] mb-1.5">
+                <span class="font-medium text-stone-300 flex items-center space-x-1.5">
+                  <i class="fa-solid fa-filter text-sky-400"></i>
+                  <span>Temporal Persistence Hysteresis</span>
+                </span>
+                <span class="font-mono-nums text-sky-400 font-semibold" id="stat-temporal-status">Active</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-[10px]">
+                <div class="bg-stone-950/80 p-2 rounded border border-stone-800/80">
+                  <span class="text-stone-500 block text-[9px] uppercase font-mono">Confirmed</span>
+                  <span class="font-mono-nums text-stone-200 font-medium" id="stat-temporal-confirmed">0 sightings</span>
+                </div>
+                <div class="bg-stone-950/80 p-2 rounded border border-stone-800/80">
+                  <span class="text-stone-500 block text-[9px] uppercase font-mono">Suppressed Glitches</span>
+                  <span class="font-mono-nums text-amber-400 font-medium" id="stat-temporal-suppressed">0 filtered</span>
+                </div>
+              </div>
+              <div class="mt-2 text-[10px] text-stone-500 flex items-center justify-between">
+                <span>Persistence Window: <span class="font-mono-nums text-stone-400" id="stat-temporal-window">3.0s</span></span>
+                <span>Threshold: <span class="font-mono-nums text-emerald-400" id="stat-temporal-hits">3 Frames</span></span>
+              </div>
+            </div>
           </div>
 
           <div class="pt-4 mt-4 border-t border-stone-800 text-[11px] text-stone-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -882,6 +907,29 @@
     }
     loadActiveSessions();
     setInterval(loadActiveSessions, 10000);
+
+    async function loadTemporalFilterTelemetry() {
+      try {
+        const res = await fetch(`${API_BASE}/api/filter/temporal`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const confBadge = document.getElementById('stat-temporal-confirmed');
+        const suppBadge = document.getElementById('stat-temporal-suppressed');
+        const hitsBadge = document.getElementById('stat-temporal-hits');
+        const windowBadge = document.getElementById('stat-temporal-window');
+        const statusBadge = document.getElementById('stat-temporal-status');
+
+        if (confBadge) confBadge.textContent = `${data.total_confirmed || 0} sightings`;
+        if (suppBadge) suppBadge.textContent = `${data.total_suppressed_glitches || 0} filtered`;
+        if (hitsBadge && data.config) hitsBadge.textContent = `${data.config.min_hits} Frames`;
+        if (windowBadge && data.config) windowBadge.textContent = `${data.config.decay_timeout_seconds}s`;
+        if (statusBadge && data.config) statusBadge.textContent = data.config.bypass ? 'Bypassed' : 'Active';
+      } catch (err) {
+        console.warn('Temporal filter fetch failed:', err);
+      }
+    }
+    loadTemporalFilterTelemetry();
+    setInterval(loadTemporalFilterTelemetry, 15000);
 
     // Initialize mobile view tab on boot
     setMobileTab('streams');
