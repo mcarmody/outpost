@@ -546,6 +546,29 @@ def test_mobile_shell_invariants():
     assert "tile-katmai_brooks_falls" in html
 
 
+def test_stream_allowlist_alias_resolution_and_simulation():
+    """Verify stream allowlist endpoint resolves aliases and simulate.py provides in-domain species."""
+    from simulate import STREAMS
+    client = TestClient(app)
+
+    # 1. Alias resolution on GET /api/streams/{stream_id}/allowlist
+    resp_canonical = client.get("/api/streams/katmai_brooks_01/allowlist")
+    assert resp_canonical.status_code == 200
+    data_canonical = resp_canonical.json()
+    assert "bear" in data_canonical["allowed_species"]
+
+    resp_alias = client.get("/api/streams/katmai_brooks_falls/allowlist")
+    assert resp_alias.status_code == 200
+    data_alias = resp_alias.json()
+    assert "bear" in data_alias["allowed_species"]
+
+    # 2. Verify simulate.py provides in-domain species for Anacapa
+    anacapa_species = [s[0] for s in STREAMS["anacapa_kelp_01"]["species"]]
+    assert any("person" in s.lower() or "diver" in s.lower() for s in anacapa_species)
+    assert any("boat" in s.lower() or "vessel" in s.lower() for s in anacapa_species)
+
+
+
 
 
 

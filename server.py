@@ -702,9 +702,10 @@ async def get_stream_allowlists():
 @app.get("/api/streams/{stream_id}/allowlist")
 async def get_single_stream_allowlist(stream_id: str):
     """Retrieve species allowlist configuration for a specific stream."""
-    if stream_id not in stream_allowlists:
+    target_id = stream_id if stream_id in stream_allowlists else resolve_stream_id(stream_id)
+    if target_id not in stream_allowlists:
         return {"stream_id": stream_id, "allowed_species": [], "strict_filtering": False}
-    return stream_allowlists[stream_id]
+    return stream_allowlists[target_id]
 
 
 @app.post("/api/streams/{stream_id}/allowlist")

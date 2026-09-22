@@ -28,6 +28,8 @@ STREAMS = {
         "name": "Explore.org Anacapa Kelp Forest",
         "bg_color": (10, 35, 45),
         "species": [
+            ("Diver (person)", (40, 180, 220)),
+            ("Research Vessel (boat)", (180, 180, 180)),
             ("Garibaldi", (255, 140, 0)),
             ("Giant Kelp Bass", (120, 160, 140)),
             ("California Sea Lion", (180, 150, 120)),
@@ -153,6 +155,12 @@ def simulate_event(api_url: Optional[str] = "http://localhost:8000") -> Dict:
             resp = requests.post(f"{api_url.rstrip('/')}/api/events", json=payload, timeout=2.0)
             if resp.status_code == 201:
                 print(f"[Sim] Dispatched: {species_name} ({conf:.2f}) on {stream_id} -> {event_id}")
+            elif resp.status_code == 200:
+                data = resp.json()
+                if data.get("filtered"):
+                    print(f"[Sim] Filtered (allowlist): {species_name} on {stream_id} — {data.get('reason')}")
+                else:
+                    print(f"[Sim] Processed (HTTP 200): {species_name} on {stream_id}")
             else:
                 print(f"[Sim] Warning: API returned HTTP {resp.status_code}")
         except Exception as e:
@@ -166,7 +174,11 @@ def main():
     parser.add_argument("--api-url", type=str, default="http://localhost:8000", help="Outpost server endpoint")
     parser.add_argument("--count", type=int, default=10, help="Number of events to generate (0 for continuous)")
     parser.add_argument("--interval", type=float, default=2.0, help="Seconds between events")
+    parser.add_argument("--once", action="store_true", help="Generate exactly one event and exit")
     args = parser.parse_args()
+
+    if args.once:
+        args.count = 1
 
     print(f"[*] Starting Outpost synthetic feed generator (target: {args.api_url})...")
 
