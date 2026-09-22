@@ -5,6 +5,7 @@ import json
 import time
 import pytest
 from fastapi.testclient import TestClient
+import db
 from server import (
     app,
     recent_events,
@@ -15,12 +16,14 @@ from server import (
     alert_rules,
     AlertRule,
     SNAPSHOTS_DIR,
+    hydrate_from_db,
 )
 
 
 @pytest.fixture(autouse=True)
 def reset_state():
-    """Reset in-memory state before each test."""
+    """Reset in-memory and database state before each test."""
+    db.clear_events()
     recent_events.clear()
     subscribers.clear()
     species_stats.clear()
@@ -40,6 +43,8 @@ def test_health_check():
     assert data["service"] == "outpost-telemetry-bus"
     assert "active_sse_subscribers" in data
     assert "ring_buffer_depth" in data
+    assert "database" in data
+    assert "total_events" in data["database"]
 
 
 def test_root_dashboard():
@@ -680,6 +685,136 @@ def test_index_html_lightbox_and_quick_filters():
     assert "openEventModal" in html
     assert "openStreamSnapshotModal" in html
     assert "ensureSpeciesInDropdown" in html
+
+
+def test_sqlite_persistence_and_restart_survivability():
+    """Verify events persist in SQLite and can be hydrated back after server restart."""
+    client = TestClient(app)
+
+    # Ingest 2 events
+    evt1 = {
+        "event_id": "evt_survive_01",
+        "stream_id": "anacapa_kelp_01",
+        "species": "person",
+        "confidence": 0.91,
+        "bbox": [10, 20, 30, 40],
+    }
+    evt2 = {
+        "event_id": "evt_survive_02",
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.88,
+        "bbox": [50, 60, 70, 80],
+    }
+    res1 = client.post("/api/events", json=evt1)
+    res2 = client.post("/api/events", json=evt2)
+    assert res1.status_code == 201
+    assert res2.status_code == 201
+
+    # Verify SQLite recorded both events
+    db_stats = db.get_db_stats()
+    assert db_stats["total_events"] == 2
+
+    # Simulate server crash/restart: wipe in-memory structures completely
+    recent_events.clear()
+    species_stats.clear()
+    for st in stream_telemetry.values():
+        st["total_detections"] = 0
+        st["status"] = "idle"
+        st["last_detection"] = None
+
+    assert len(recent_events) == 0
+
+    # 1. Direct event lookup survives memory wipe via SQLite fallback
+    lookup_res = client.get("/api/events/evt_survive_01")
+    assert lookup_res.status_code == 200
+    assert lookup_res.json()["event_id"] == "evt_survive_01"
+    assert lookup_res.json()["species"] == "person"
+
+    # 2. Server restart hydration restores recent_events, stream telemetry, and species stats
+    hydrate_from_db()
+    assert len(recent_events) == 2
+    assert "person" in species_stats
+    assert "blue_jay" in species_stats
+
+    # 3. GET /events/recent returns hydrated events
+    rec_res = client.get("/events/recent")
+    assert rec_res.status_code == 200
+    events = rec_res.json()
+    assert len(events) == 2
+    assert events[0]["event_id"] == "evt_survive_01"
+    assert events[1]["event_id"] == "evt_survive_02"
+
+
+def test_database_stats_endpoint():
+    """Verify /api/database/stats exposes accurate record counts and file footprint."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "event_id": "evt_db_stat_01",
+        "stream_id": "cornell_feeder_01",
+        "species": "blue_jay",
+        "confidence": 0.95,
+        "bbox": [10, 20, 30, 40],
+    })
+
+    res = client.get("/api/database/stats")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ready"
+    assert data["total_events"] >= 1
+    assert "db_size_bytes" in data
+    assert "db_size_mb" in data
+    assert "oldest_event" in data
+    assert "newest_event" in data
+
+
+def test_database_prometheus_metrics():
+    """Verify /metrics exposes SQLite total events and size metrics."""
+    client = TestClient(app)
+    client.post("/api/events", json={
+        "event_id": "evt_prom_db_01",
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.89,
+        "bbox": [15, 25, 35, 45],
+    })
+
+    res = client.get("/metrics")
+    assert res.status_code == 200
+    text = res.text
+    assert "outpost_database_events_total" in text
+    assert "outpost_database_size_bytes" in text
+
+
+def test_database_event_pruning():
+    """Verify db.prune_events removes expired events older than cutoff."""
+    # Insert an event timestamped 40 days ago
+    old_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - (40 * 86400)))
+    db.save_event({
+        "event_id": "evt_ancient_01",
+        "timestamp": old_time,
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.85,
+        "bbox": [0, 0, 10, 10],
+    })
+    # Insert a fresh event
+    db.save_event({
+        "event_id": "evt_fresh_01",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "stream_id": "cornell_feeder_01",
+        "species": "cardinal",
+        "confidence": 0.92,
+        "bbox": [0, 0, 10, 10],
+    })
+
+    assert db.get_event("evt_ancient_01") is not None
+    assert db.get_event("evt_fresh_01") is not None
+
+    pruned = db.prune_events(max_age_days=30.0)
+    assert pruned == 1
+    assert db.get_event("evt_ancient_01") is None
+    assert db.get_event("evt_fresh_01") is not None
 
 
 

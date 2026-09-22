@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import db
 from alerts_dispatcher import AlertDispatcher
 from retention import get_snapshots_storage_stats, prune_snapshots
 from stream_watchdog import StreamWatchdog
@@ -45,14 +46,11 @@ RETENTION_MAX_STORAGE_MB = 500.0
 
 
 async def _retention_loop():
-    """Background snapshot pruning, actually wired into the app lifecycle.
+    """Background snapshot and database retention loop, wired into app lifecycle.
 
-    This was claimed done ('wiring the automated background cleanup loop
-    into the FastAPI lifecycle') but never actually landed — only the
-    manual /api/maintenance/prune endpoint existed. Confirmed live
-    2026-09-21 during the hourly check-in: snapshot_storage_mb had grown
-    to 649MB / 1535 files, well past the 500MB ceiling this was supposed
-    to enforce automatically."""
+    Enforces snapshot age/storage limits and prunes expired database records
+    older than 30 days.
+    """
     while True:
         try:
             res = prune_snapshots(
@@ -63,6 +61,9 @@ async def _retention_loop():
             if res.get("pruned_files"):
                 print(f"[retention] pruned {res['pruned_files']} files, "
                       f"freed {res['freed_mb']}MB, remaining {res['remaining_mb']}MB")
+            pruned_evts = db.prune_events(max_age_days=30.0)
+            if pruned_evts:
+                print(f"[retention] pruned {pruned_evts} expired database records older than 30 days")
         except Exception as e:
             print(f"[retention] loop error (continuing): {e}")
         await asyncio.sleep(RETENTION_INTERVAL_SECONDS)
@@ -70,6 +71,9 @@ async def _retention_loop():
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    db.init_db()
+    if len(recent_events) == 0:
+        hydrate_from_db()
     task = asyncio.create_task(_retention_loop())
     try:
         yield
@@ -301,6 +305,51 @@ total_events_dispatched = 0
 start_time = time.time()
 
 
+def hydrate_from_db():
+    """Load latest events and telemetry summaries from SQLite into memory on server boot."""
+    global total_events_dispatched
+    try:
+        events = db.query_events(limit=200, order="asc")
+        if not events:
+            return
+        recent_events.clear()
+        for evt_data in events:
+            evt = DetectionEvent(**evt_data)
+            recent_events.append(evt)
+
+            # Hydrate stream telemetry
+            sid = evt.stream_id
+            if sid in stream_telemetry:
+                stream_telemetry[sid]["total_detections"] += 1
+                stream_telemetry[sid]["last_detection"] = evt.timestamp
+                stream_telemetry[sid]["status"] = "active"
+
+            # Hydrate species stats
+            sp = evt.species
+            if sp not in species_stats:
+                species_stats[sp] = {
+                    "species": sp,
+                    "count": 0,
+                    "peak_confidence": evt.confidence,
+                    "last_seen": evt.timestamp,
+                    "streams": [evt.stream_id],
+                }
+            species_stats[sp]["count"] += 1
+            species_stats[sp]["peak_confidence"] = max(species_stats[sp]["peak_confidence"], evt.confidence)
+            species_stats[sp]["last_seen"] = evt.timestamp
+            if evt.stream_id not in species_stats[sp]["streams"]:
+                species_stats[sp]["streams"].append(evt.stream_id)
+
+        total_events_dispatched = len(recent_events)
+    except Exception as e:
+        print(f"[db] hydration error: {e}")
+
+
+# Initialize SQLite database and hydrate on module load
+db.init_db()
+hydrate_from_db()
+
+
 class EdgeRunnerRegistration(BaseModel):
     stream_id: str
     cuda_available: bool = False
@@ -343,9 +392,10 @@ def _hardware_for_status_endpoints() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health_check():
-    """System telemetry and active subscriber metrics."""
+    """System telemetry, database metrics, and active subscriber status."""
     snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
     hw = _hardware_for_status_endpoints()
+    db_stats = db.get_db_stats()
     return {
         "status": "online",
         "service": "outpost-telemetry-bus",
@@ -356,6 +406,7 @@ async def health_check():
         "active_streams": len([s for s in stream_telemetry.values() if s["status"] == "active"]),
         "snapshot_storage_mb": snap_stats["total_mb"],
         "snapshot_files_count": snap_stats["total_files"],
+        "database": db_stats,
         "hardware": hw,
     }
 
@@ -380,6 +431,7 @@ async def trigger_prune(max_age_hours: float = 24.0, max_storage_mb: float = 500
 async def prometheus_metrics():
     """Exposes Prometheus text exposition format metrics for scraping."""
     snap_stats = get_snapshots_storage_stats(SNAPSHOTS_DIR)
+    db_stats = db.get_db_stats()
     uptime = round(time.time() - start_time, 2)
     storage_bytes = int(snap_stats["total_mb"] * 1024 * 1024)
 
@@ -396,6 +448,12 @@ async def prometheus_metrics():
         "# HELP outpost_ring_buffer_depth Current depth of in-memory recent events buffer",
         "# TYPE outpost_ring_buffer_depth gauge",
         f"outpost_ring_buffer_depth {len(recent_events)}",
+        "# HELP outpost_database_events_total Total detection events stored in SQLite",
+        "# TYPE outpost_database_events_total gauge",
+        f"outpost_database_events_total {db_stats.get('total_events', 0)}",
+        "# HELP outpost_database_size_bytes Size of SQLite database file on disk",
+        "# TYPE outpost_database_size_bytes gauge",
+        f"outpost_database_size_bytes {db_stats.get('db_size_bytes', 0)}",
         "# HELP outpost_snapshot_storage_bytes Total disk space occupied by snapshots",
         "# TYPE outpost_snapshot_storage_bytes gauge",
         f"outpost_snapshot_storage_bytes {storage_bytes}",
@@ -425,11 +483,16 @@ async def get_recent_events(
     stream_id: Optional[str] = None,
     species: Optional[str] = None,
 ):
-    """Retrieve recent detection events from the ring buffer with optional stream and species filtering."""
+    """Retrieve recent detection events from persistent SQLite with optional stream and species filtering."""
+    canonical_stream = resolve_stream_id(stream_id) if stream_id else None
+    events_data = db.query_events(limit=limit, stream_id=canonical_stream, species=species, order="asc")
+    if events_data:
+        return [DetectionEvent(**e) for e in events_data]
+
+    # In-memory buffer fallback
     events = list(recent_events)
-    if stream_id:
-        target_id = resolve_stream_id(stream_id)
-        events = [e for e in events if e.stream_id == target_id]
+    if canonical_stream:
+        events = [e for e in events if e.stream_id == canonical_stream]
     if species:
         sp_norm = species.strip().lower().replace("_", " ")
         events = [e for e in events if e.species.strip().lower().replace("_", " ") == sp_norm]
@@ -438,11 +501,21 @@ async def get_recent_events(
 
 @app.get("/api/events/{event_id}", response_model=DetectionEvent)
 async def get_event_by_id(event_id: str):
-    """Retrieve a specific detection event from the ring buffer by ID."""
+    """Retrieve a specific detection event from ring buffer or persistent SQLite by ID."""
     for e in reversed(recent_events):
         if e.event_id == event_id:
             return e
-    raise HTTPException(status_code=404, detail=f"Event '{event_id}' not found in active telemetry buffer.")
+    db_event = db.get_event(event_id)
+    if db_event:
+        return DetectionEvent(**db_event)
+    raise HTTPException(status_code=404, detail=f"Event '{event_id}' not found in active telemetry buffer or database.")
+
+
+@app.get("/api/database/stats")
+async def get_database_stats():
+    """Retrieve persistent SQLite database telemetry and storage stats."""
+    return db.get_db_stats()
+
 
 
 @app.get("/api/streams")
@@ -612,6 +685,9 @@ def process_event(event: DetectionEvent) -> dict:
                 )
                 event.metadata["webhook_dispatch"] = dispatch_res
                 break
+
+    # Persist detection event to SQLite database
+    db.save_event(event)
 
     recent_events.append(event)
     total_events_dispatched += 1

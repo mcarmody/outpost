@@ -3,3 +3,7 @@ __pycache__/
 snapshots/
 *.log
 *.pid
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

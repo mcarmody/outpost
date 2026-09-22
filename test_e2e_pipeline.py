@@ -17,6 +17,7 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 
+import db
 from server import (
     app,
     recent_events,
@@ -32,6 +33,7 @@ from simulate import generate_synthetic_snapshot, STREAMS
 @pytest.fixture(autouse=True)
 def clean_pipeline_state():
     """Reset server state before each integration test."""
+    db.clear_events()
     recent_events.clear()
     subscribers.clear()
     species_stats.clear()
